@@ -6,7 +6,7 @@ Full technical design: [`spec.md`](spec.md). Cloud architecture design: [`docs/a
 
 ## Architecture in one paragraph
 
-Two LangGraph-orchestrated pipelines. **Ingestion** (`POST /context`): deterministic PyMuPDF extraction of an image-annotated transcript → a tool-calling Claude agent that reads the transcript and selectively calls a vision subagent to describe relevant images → a structured digest → a web-search-grounded company profile, persisted once and reused by every future `/generate` call for that company. **Generation** (`POST /generate`): load both company profiles → build a grounded prompt against the template's constraints → generate structured output → validate word limits in code → targeted repair loop (max 2 attempts, then hard-truncate) → match image slots to extracted assets. See `spec.md` §3 for the full node-by-node design and rationale.
+Two LangGraph-orchestrated pipelines. **Ingestion** (`POST /context`): deterministic PyMuPDF extraction of an image-annotated transcript → a tool-calling Claude agent that reads the transcript and selectively calls a vision subagent to describe relevant images → a structured digest → a LangChain deep research agent (`deepagents.create_deep_agent`, plans with a todo list, delegates to a company-research sub-agent bound to Claude's native web search) that produces a structured company profile, persisted once and reused by every future `/generate` call for that company. **Generation** (`POST /generate`): load both company profiles → build a grounded prompt against the template's constraints → generate structured output → validate word limits in code → targeted repair loop (max 2 attempts, then hard-truncate) → match image slots to extracted assets. See `spec.md` §3 and `app/deep_research.py` for the full node-by-node design and rationale.
 
 ## Prerequisites
 
@@ -107,6 +107,7 @@ app/
   pdf_extraction.py       PyMuPDF parsing -> annotated transcript + saved images
   vision.py                describe_image vision subagent
   llm.py                   LLM model construction (provider-agnostic + Anthropic-specific)
+  deep_research.py          profile_company via deepagents.create_deep_agent
   prompts.py                module-level prompt string constants
   templates.py               layout template config loader
   graphs/

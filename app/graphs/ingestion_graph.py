@@ -4,16 +4,15 @@
 
 import json
 import logging
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from sqlmodel import Session
 
+from app.deep_research import research_company_profile
 from app.graphs.ingestion_agent import run_ingestion_agent
-from app.llm import get_chat_anthropic
 from app.models import Company, CompanyProfile, PdfDigest
 from app.pdf_extraction import ImageMeta, extract_pdf_structure
-from app.prompts import PROFILE_COMPANY_SYSTEM_PROMPT
-from app.schemas import CompanyProfileSchema, PdfDigestSchema, WebSource
+from app.schemas import CompanyProfileSchema, PdfDigestSchema
 
 logger = logging.getLogger(__name__)
 
@@ -32,37 +31,6 @@ class IngestionState(TypedDict, total=False):
     images_reviewed: int
     images_cap_hit: bool
     profile: CompanyProfileSchema
-
-
-def _flatten_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content or []:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-    return "\n".join(parts)
-
-
-def _extract_web_sources(content: Any) -> list[WebSource]:
-    sources: list[WebSource] = []
-    seen: set[str] = set()
-
-    def _walk(node: Any) -> None:
-        if isinstance(node, dict):
-            url = node.get("url")
-            if url and url not in seen:
-                seen.add(url)
-                note = node.get("title") or node.get("encrypted_content", "")[:0] or "cited during web search"
-                sources.append(WebSource(url=url, note=str(note)))
-            for value in node.values():
-                _walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                _walk(item)
-
-    _walk(content)
-    return sources
 
 
 def extract_pdf_structure_node(state: IngestionState) -> dict:
@@ -104,34 +72,11 @@ def make_persist_digest_node(session: Session):
 
 
 def profile_company_node(state: IngestionState) -> dict:
-    digest = state["digest"]
-
-    # Two-step call: (1) a web-search-bound research pass, (2) a plain structuring
-    # pass with with_structured_output. Splitting these avoids relying on binding a
-    # server-side tool AND forced structured output in a single call, which is a
-    # version-fragile combination in the LangChain/Anthropic integration.
-    research_model = get_chat_anthropic(temperature=0).bind_tools(
-        [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
-    )
-    research_prompt = PROFILE_COMPANY_SYSTEM_PROMPT.format(
-        document_type=digest.document_type,
-        digest_text=digest.digest_text,
-        key_facts=", ".join(digest.key_facts),
-    )
-    research_result = research_model.invoke([{"role": "user", "content": research_prompt}])
-    research_text = _flatten_content(research_result.content)
-    web_sources = _extract_web_sources(research_result.content)
-
-    structuring_model = get_chat_anthropic(temperature=0).with_structured_output(CompanyProfileSchema)
-    structuring_prompt = (
-        "Based on the research below, produce a structured company profile.\n\n"
-        f"Research:\n{research_text}\n\n"
-        f"Web sources cited: {[s.url for s in web_sources]}"
-    )
-    profile = structuring_model.invoke([{"role": "user", "content": structuring_prompt}])
-    if not profile.web_sources:
-        profile.web_sources = web_sources
-
+    # LangChain deep research agent (deepagents.create_deep_agent): plans with a
+    # todo list, delegates to a company-research-agent sub-agent bound to
+    # Anthropic's native web_search tool, and returns a CompanyProfileSchema via
+    # response_format structured output. See app/deep_research.py.
+    profile = research_company_profile(state["digest"])
     return {"profile": profile}
 
 
