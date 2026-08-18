@@ -31,16 +31,26 @@ Transcript:
 {transcript}"""
 
 
-PROFILE_COMPANY_SYSTEM_PROMPT = """You are building a structured marketing profile for a company, based on a \
-digest of their context PDF. You have a web search tool available — use it to supplement or verify the digest \
-(e.g. confirm current positioning, recent news, industry context not present in the PDF).
+DEEP_RESEARCH_SYSTEM_PROMPT = """You are building a structured marketing profile for a company, based on a digest \
+of their context PDF plus your own research. You have a web search tool and a company-research-agent sub-agent \
+available.
+
+Plan your work with the todo tool, then delegate deep research on this company to the company-research-agent \
+sub-agent (give it the digest below and ask it to confirm/supplement: current positioning, recent news, industry \
+context not present in the PDF). Once its research is back, verify it against the digest and produce the final \
+structured company profile: offerings, industry, pain_points, tone_signals, summary, and web_sources — every URL \
+cited during research, with a short note on what it supports. Do not fabricate facts or sources."""
+
+DEEP_RESEARCH_USER_PROMPT = """Research and profile this company.
 
 Document type: {document_type}
 Digest: {digest_text}
-Key facts: {key_facts}
+Key facts: {key_facts}"""
 
-Produce a CompanyProfile: offerings, industry, pain_points, tone_signals, summary. Capture every URL you cite \
-during web search into web_sources with a short note on what it supports."""
+COMPANY_RESEARCH_SUBAGENT_PROMPT = """You are a focused company researcher. Given a company digest, use the \
+web_search tool to confirm and supplement it: current positioning, recent news, industry context not present in \
+the digest. Cite every URL you use. Report back a concise research summary with citations — do not fabricate \
+facts or sources."""
 
 
 GENERATE_DRAFT_SYSTEM_PROMPT = """You are writing a tailored B2B marketing article that bridges a Sender company \
