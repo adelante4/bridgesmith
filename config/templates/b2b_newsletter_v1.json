@@ -1,0 +1,15 @@
+{
+  "template_id": "b2b_newsletter_v1",
+  "fields": {
+    "headline": {"max_words": 12},
+    "subheadline": {"max_words": 20},
+    "sections": [
+      {"id": "body_intro", "min_words": 40, "max_words": 60, "guidance": "Hook connecting receiver's industry challenge to sender's offering"},
+      {"id": "body_value", "min_words": 80, "max_words": 120, "guidance": "Concrete value proposition, grounded in provided context only"}
+    ],
+    "pull_quote": {"max_words": 25},
+    "cta": {"max_words": 15}
+  },
+  "image_slots": ["hero", "section_1"],
+  "theme": {"primary_color": "#0B5FFF", "accent_color": "#FFB020"}
+}
