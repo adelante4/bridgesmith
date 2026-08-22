@@ -7,6 +7,7 @@ requests.
 """
 
 import logging
+import threading
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -51,6 +52,13 @@ def _build_tools(
     image_map: dict[str, ImageMeta],
     run_state: _IngestionRunState,
 ):
+    # create_react_agent's ToolNode runs multiple tool calls from one LLM turn
+    # concurrently in worker threads. The sqlite3 connection (check_same_thread=
+    # False) tolerates cross-thread use but not *concurrent* use, so unlocked
+    # access here corrupts the cursor (sqlite3.InterfaceError: bad parameter or
+    # other API misuse). Serialize all session access per run.
+    session_lock = threading.Lock()
+
     @tool
     def describe_image(image_id: str, context_hint: str) -> str:
         """Describe an image from the document. Call for images materially relevant
@@ -60,42 +68,45 @@ def _build_tools(
         if run_state.submitted:
             return "[error] submit_digest already called; no further tool calls allowed."
 
-        # Idempotency within this run only: image_id is stable per-run, not
-        # company-wide, so caching is scoped to this run's pdf_digest_id.
-        cached = session.exec(
-            select(Image).where(Image.pdf_digest_id == pdf_digest_id, Image.image_id == image_id)
-        ).first()
-        if cached is not None:
-            return f"type: {cached.tag.value} | summary: {cached.description}"
+        with session_lock:
+            # Idempotency within this run only: image_id is stable per-run, not
+            # company-wide, so caching is scoped to this run's pdf_digest_id.
+            cached = session.exec(
+                select(Image).where(Image.pdf_digest_id == pdf_digest_id, Image.image_id == image_id)
+            ).first()
+            if cached is not None:
+                return f"type: {cached.tag.value} | summary: {cached.description}"
 
-        if run_state.vision_calls_made >= MAX_DESCRIBE_IMAGE_CALLS:
-            run_state.cap_hit = True
-            return "[cap reached] descriptions unavailable for further images; proceed to submit_digest."
+            if run_state.vision_calls_made >= MAX_DESCRIBE_IMAGE_CALLS:
+                run_state.cap_hit = True
+                return "[cap reached] descriptions unavailable for further images; proceed to submit_digest."
 
-        meta = image_map.get(image_id)
-        if meta is None:
-            return f"[error] unknown image_id '{image_id}'"
+            meta = image_map.get(image_id)
+            if meta is None:
+                return f"[error] unknown image_id '{image_id}'"
+
+            run_state.vision_calls_made += 1
 
         description = describe_image_subagent(meta.file_path, context_hint)
-        run_state.vision_calls_made += 1
 
         tag = _IMAGE_TYPE_TO_TAG.get(description.image_type, ImageTag.generic)
         stored_description = description.summary
         if description.visible_text:
             stored_description += f" | visible_text: {description.visible_text}"
 
-        # Durability boundary: persist immediately, independent of the outer graph run.
-        image_row = Image(
-            company_id=company_id,
-            pdf_digest_id=pdf_digest_id,
-            image_id=image_id,
-            file_path=meta.file_path,
-            page_number=meta.page_number,
-            description=stored_description,
-            tag=tag,
-        )
-        session.add(image_row)
-        session.commit()
+        with session_lock:
+            # Durability boundary: persist immediately, independent of the outer graph run.
+            image_row = Image(
+                company_id=company_id,
+                pdf_digest_id=pdf_digest_id,
+                image_id=image_id,
+                file_path=meta.file_path,
+                page_number=meta.page_number,
+                description=stored_description,
+                tag=tag,
+            )
+            session.add(image_row)
+            session.commit()
 
         return format_description_for_tool_result(description)
 
