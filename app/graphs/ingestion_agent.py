@@ -145,7 +145,7 @@ def run_ingestion_agent(
     config = config or new_trace_config()
     run_state = _IngestionRunState()
     tools = _build_tools(session, company_id, pdf_digest_id, image_map, run_state, config)
-    model = get_chat_anthropic(temperature=0)
+    model = get_chat_anthropic()
     system_prompt = INGESTION_AGENT_SYSTEM_PROMPT.format(transcript=transcript)
 
     agent = create_react_agent(model, tools, prompt=system_prompt)

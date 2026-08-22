@@ -145,7 +145,7 @@ def generate_draft_node(state: GenerationState, config: RunnableConfig) -> dict:
     # `config` is the RunnableConfig LangGraph passed into graph.invoke() at the
     # route handler — reusing it (rather than minting a new callback handler here)
     # keeps this span nested under that one request's Langfuse trace.
-    model = get_provider_agnostic_model(temperature=0.4).with_structured_output(ArticleSchema)
+    model = get_provider_agnostic_model().with_structured_output(ArticleSchema)
     draft = model.invoke(
         [{"role": "user", "content": state["system_prompt"]}],
         config=config,
@@ -208,7 +208,7 @@ def repair_node(state: GenerationState, config: RunnableConfig) -> dict:
     draft = state["draft"]
     template = state["template"]
     errors = state["validation_errors"]
-    model = get_provider_agnostic_model(temperature=0.2)
+    model = get_provider_agnostic_model()
 
     guidance_map = {s.id: s.guidance for s in template.fields.sections}
     updated_sections = {s.id: s.text for s in draft.sections}

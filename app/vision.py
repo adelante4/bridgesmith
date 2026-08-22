@@ -51,7 +51,7 @@ def describe_image_subagent(
     b64_data = base64.b64encode(image_bytes).decode("utf-8")
 
     # Fresh model instance per call — no shared conversation history with the caller.
-    model = get_chat_anthropic(temperature=0).with_structured_output(ImageDescription)
+    model = get_chat_anthropic().with_structured_output(ImageDescription)
 
     message = {
         "role": "user",
