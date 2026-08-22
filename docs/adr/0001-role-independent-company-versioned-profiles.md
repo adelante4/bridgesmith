@@ -1,0 +1,7 @@
+# Company is role-independent; CompanyProfile and PdfDigest are versioned per upload
+
+`spec.md`'s original design ties `role` (`sender`/`receiver`) to `Company` as a fixed attribute set at ingestion, and treats `CompanyProfile` as a single overwritten-in-place row keyed by `company_id`. In practice a real company can be a Sender in one deal and a Receiver in another, and a second PDF upload for the same company is a real path (not just an untested edge case) — the original design either loses reuse across roles or 500s on re-upload (primary-key conflict on `CompanyProfile`).
+
+Decided: `Company` is a role-independent identity (`id`, `name`, `created_at` only — no `role`, no per-run artifacts). `role` is dropped from `POST /context` entirely and only exists as request-time labels (`sender_id`/`receiver_id`) in `/generate`. `PdfDigest` and `CompanyProfile` are both versioned per ingestion run (autoincrement PK, `company_id` FK); `/generate` always uses the latest version of each. `Image` rows are scoped to the run that extracted them, and asset matching in `/generate` only considers the latest run's images. `GeneratedArticle` records the exact `CompanyProfile` version ids (sender + receiver) it was grounded in, so past articles stay traceable as profiles change over time.
+
+**Considered**: keeping `role` as a fixed `Company` attribute (original spec) — rejected because it forecloses cross-role reuse and makes "upload a second PDF" a genuinely separate, awkward code path instead of the common case history-tracking already has to handle anyway.

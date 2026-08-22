@@ -9,6 +9,7 @@ load_dotenv()  # must run before any module reads API key env vars
 from fastapi import FastAPI  # noqa: E402
 
 from app.db import init_db  # noqa: E402
+from app.observability import init_langfuse  # noqa: E402
 from app.routes import context, generate  # noqa: E402
 
 logging.basicConfig(
@@ -20,6 +21,7 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    init_langfuse()
     yield
 
 

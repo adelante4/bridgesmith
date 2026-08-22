@@ -13,6 +13,7 @@ import mimetypes
 from PIL import Image as PILImage
 
 from app.llm import get_chat_anthropic
+from app.observability import get_langfuse_callbacks
 from app.prompts import VISION_SUBAGENT_PROMPT
 from app.schemas import ImageDescription
 
@@ -57,7 +58,7 @@ def describe_image_subagent(image_path: str, context_hint: str) -> ImageDescript
         ],
     }
 
-    result = model.invoke([message])
+    result = model.invoke([message], config={"callbacks": get_langfuse_callbacks()})
     return result
 
 

@@ -41,22 +41,29 @@ docker compose up --build
 
 SQLite database and extracted PDF assets persist under `./data` on the host (volume-mounted).
 
+## Langfuse (local LLM tracing)
+
+`docker compose up` also brings up a self-hosted Langfuse (v4) stack — `langfuse-web`/`langfuse-worker` + its postgres/clickhouse/redis/minio dependencies — vendored from [langfuse/langfuse's docker-compose.yml](https://github.com/langfuse/langfuse/blob/main/docker-compose.yml). `.env.example`'s `LANGFUSE_INIT_*` vars auto-provision a project matching `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` on first boot, so tracing works with no manual signup.
+
+- UI: `http://localhost:3000` (login `dev@localhost` / `changeme123`, from `.env.example` — change these before using anywhere but a local box)
+- Traces: every LLM/agent call in `app/vision.py`, `app/graphs/ingestion_agent.py`, `app/deep_research.py`, and `app/graphs/generation_graph.py` is wired with a Langfuse callback (`app/observability.py`) — hit `/context` or `/generate` and the trace shows up in the UI within a few seconds.
+- Running `uvicorn` directly on the host (no Docker) instead? Still works — start just the Langfuse services with `docker compose up langfuse-web langfuse-worker postgres clickhouse redis minio`, then set `LANGFUSE_HOST=http://localhost:3000` in `.env`.
+- Unset `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` to disable tracing entirely — `app/observability.py` no-ops when they're absent.
+
 ## Example usage
 
-Upload context for a sender company:
+Upload context for a company. `role` isn't a request field — Company is role-independent; sender/receiver is just which slot you pass its `company_id` into on `/generate` (see `CONTEXT.md`):
 
 ```bash
 curl -X POST http://localhost:8000/context \
-  -F role=sender \
   -F name="Acme Corp" \
   -F file=@path/to/acme_onepager.pdf
 ```
 
-Response includes a generated `company_id` (e.g. `sender_a1b2c3d4`) — save it. Repeat for the receiver:
+Response includes a generated `company_id` (e.g. `co_a1b2c3d4`) — save it. Repeat for the other company:
 
 ```bash
 curl -X POST http://localhost:8000/context \
-  -F role=receiver \
   -F name="Globex Inc" \
   -F file=@path/to/globex_brief.pdf
 ```
@@ -67,8 +74,8 @@ Generate a tailored article:
 curl -X POST http://localhost:8000/generate \
   -H "Content-Type: application/json" \
   -d '{
-    "sender_id": "sender_a1b2c3d4",
-    "receiver_id": "receiver_e5f6g7h8",
+    "sender_id": "co_a1b2c3d4",
+    "receiver_id": "co_e5f6g7h8",
     "prompt": "Focus on how Acme'\''s real-time fleet optimization reduces fuel costs for large logistics operators."
   }'
 ```

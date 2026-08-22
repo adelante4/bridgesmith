@@ -29,19 +29,9 @@ def _make_pdf_bytes(text: str) -> bytes:
 def test_upload_context_rejects_non_pdf(client):
     response = client.post(
         "/context",
-        data={"role": "sender"},
         files={"file": ("notes.txt", b"not a pdf", "text/plain")},
     )
     assert response.status_code == 400
-
-
-def test_upload_context_rejects_invalid_role(client):
-    response = client.post(
-        "/context",
-        data={"role": "vendor"},
-        files={"file": ("doc.pdf", _make_pdf_bytes("hi"), "application/pdf")},
-    )
-    assert response.status_code == 422
 
 
 def test_generate_missing_sender_returns_404(client):
