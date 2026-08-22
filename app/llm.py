@@ -30,7 +30,13 @@ def get_agent_model_name(env_var: str) -> str:
 def get_agent_model(env_var: str, **kwargs):
     """Provider-agnostic model for one agent, selected via its own env var.
     Falls back to DEFAULT_MODEL (Luna, openai) when the env var isn't set."""
-    return init_chat_model(get_agent_model_name(env_var), **kwargs)
+    model_name = get_agent_model_name(env_var)
+    if model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3"):
+        # OpenAI reasoning models reject reasoning_effort on /v1/chat/completions
+        # when function tools are bound; the Responses API supports both.
+        kwargs.setdefault("use_responses_api", True)
+        kwargs.setdefault("reasoning_effort", "medium")
+    return init_chat_model(model_name, **kwargs)
 
 
 def get_web_search_tool(env_var: str) -> dict:
