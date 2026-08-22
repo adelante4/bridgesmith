@@ -7,7 +7,7 @@ import os
 from langchain.chat_models import init_chat_model
 from langchain_anthropic import ChatAnthropic
 
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 
 
 def get_anthropic_model_name() -> str:

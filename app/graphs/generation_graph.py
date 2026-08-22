@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 from app.llm import get_provider_agnostic_model
 from app.models import CompanyProfile as CompanyProfileRow
 from app.models import Image
+from app.observability import get_langfuse_callbacks
 from app.prompts import GENERATE_DRAFT_SYSTEM_PROMPT, REPAIR_FIELD_PROMPT
 from app.schemas import (
     ArticleSchema,
@@ -41,6 +42,10 @@ class GenerationState(TypedDict, total=False):
     template: TemplateConfig
     sender_profile: CompanyProfileSchema
     receiver_profile: CompanyProfileSchema
+    sender_profile_id: int
+    receiver_profile_id: int
+    sender_pdf_digest_id: int
+    receiver_pdf_digest_id: int
     system_prompt: str
     draft: ArticleSchema
     validation_errors: list[dict]
@@ -82,18 +87,30 @@ def _profile_row_to_schema(row: CompanyProfileRow) -> CompanyProfileSchema:
     )
 
 
+def _latest_profile(session: Session, company_id: str) -> CompanyProfileRow | None:
+    return session.exec(
+        select(CompanyProfileRow)
+        .where(CompanyProfileRow.company_id == company_id)
+        .order_by(CompanyProfileRow.id.desc())
+    ).first()
+
+
 def make_load_profiles_node(session: Session):
     def load_profiles_node(state: GenerationState) -> dict:
-        sender_row = session.get(CompanyProfileRow, state["sender_id"])
+        sender_row = _latest_profile(session, state["sender_id"])
         if sender_row is None:
             raise CompanyNotFoundError(state["sender_id"], "sender")
-        receiver_row = session.get(CompanyProfileRow, state["receiver_id"])
+        receiver_row = _latest_profile(session, state["receiver_id"])
         if receiver_row is None:
             raise CompanyNotFoundError(state["receiver_id"], "receiver")
 
         return {
             "sender_profile": _profile_row_to_schema(sender_row),
             "receiver_profile": _profile_row_to_schema(receiver_row),
+            "sender_profile_id": sender_row.id,
+            "receiver_profile_id": receiver_row.id,
+            "sender_pdf_digest_id": sender_row.pdf_digest_id,
+            "receiver_pdf_digest_id": receiver_row.pdf_digest_id,
         }
 
     return load_profiles_node
@@ -126,7 +143,10 @@ def build_prompt_node(state: GenerationState) -> dict:
 def generate_draft_node(state: GenerationState) -> dict:
     # Fresh, clean model instance — deliberately no tools bound (see spec §3.2).
     model = get_provider_agnostic_model(temperature=0.4).with_structured_output(ArticleSchema)
-    draft = model.invoke([{"role": "user", "content": state["system_prompt"]}])
+    draft = model.invoke(
+        [{"role": "user", "content": state["system_prompt"]}],
+        config={"callbacks": get_langfuse_callbacks()},
+    )
     return {"draft": draft, "repair_attempts": 0}
 
 
@@ -212,7 +232,10 @@ def repair_node(state: GenerationState) -> dict:
             guidance=guidance_map.get(field_id, ""),
             current_text=current_text,
         )
-        result = model.invoke([{"role": "user", "content": prompt}])
+        result = model.invoke(
+            [{"role": "user", "content": prompt}],
+            config={"callbacks": get_langfuse_callbacks()},
+        )
         new_text = _flatten_content(result.content).strip()
 
         if field_id in updated_sections:
@@ -292,8 +315,14 @@ def make_select_assets_node(session: Session):
                 )
             )
 
-        sender_images = session.exec(select(Image).where(Image.company_id == state["sender_id"])).all()
-        receiver_images = session.exec(select(Image).where(Image.company_id == state["receiver_id"])).all()
+        # Scoped to each company's latest ingestion run only (matching the
+        # latest CompanyProfile just used) — see docs/adr/0001-....
+        sender_images = session.exec(
+            select(Image).where(Image.pdf_digest_id == state["sender_pdf_digest_id"])
+        ).all()
+        receiver_images = session.exec(
+            select(Image).where(Image.pdf_digest_id == state["receiver_pdf_digest_id"])
+        ).all()
         all_images = list(sender_images) + list(receiver_images)
 
         draft_placeholders = {p.slot: p for p in draft.image_placeholders}

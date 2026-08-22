@@ -31,21 +31,32 @@ Transcript:
 {transcript}"""
 
 
-DEEP_RESEARCH_SYSTEM_PROMPT = """You are building a structured marketing profile for a company, based on a digest \
-of their context PDF plus your own research. You have a web search tool and a company-research-agent sub-agent \
-available.
+DEEP_RESEARCH_SYSTEM_PROMPT = """You are building a structured marketing profile for a company. You will be given \
+the company's name, and — depending on what the requester supplied — some combination of a digest of an uploaded \
+context PDF and/or a free-text description. Each input below is labeled with where it came from; treat them as \
+separate sources, not one merged blob, and note that either or both may be absent besides the name. You have a web \
+search tool and a company-research-agent sub-agent available.
 
 Plan your work with the todo tool, then delegate deep research on this company to the company-research-agent \
-sub-agent (give it the digest below and ask it to confirm/supplement: current positioning, recent news, industry \
-context not present in the PDF). Once its research is back, verify it against the digest and produce the final \
+sub-agent (give it the company name and whatever inputs are present, and ask it to confirm/supplement: current \
+positioning, recent news, industry context not already covered). If neither a PDF digest nor a description was \
+supplied, research the company from its name alone via web search — do not invent document content that was never \
+given to you. Once research is back, verify it against whatever inputs were supplied and produce the final \
 structured company profile: offerings, industry, pain_points, tone_signals, summary, and web_sources — every URL \
 cited during research, with a short note on what it supports. Do not fabricate facts or sources."""
 
 DEEP_RESEARCH_USER_PROMPT = """Research and profile this company.
 
-Document type: {document_type}
-Digest: {digest_text}
-Key facts: {key_facts}"""
+Company name: {name}
+
+--- Source: uploaded context PDF (digest produced by an ingestion agent) ---
+{pdf_section}
+
+--- Source: user-provided free-text description ---
+{description_section}"""
+
+NO_PDF_DIGEST_PLACEHOLDER = "(none — no PDF was uploaded for this run)"
+NO_DESCRIPTION_PLACEHOLDER = "(none — no description was provided for this run)"
 
 COMPANY_RESEARCH_SUBAGENT_PROMPT = """You are a focused company researcher. Given a company digest, use the \
 web_search tool to confirm and supplement it: current positioning, recent news, industry context not present in \

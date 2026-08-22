@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 
 from app.llm import get_chat_anthropic
 from app.models import Image, ImageTag
+from app.observability import get_langfuse_callbacks
 from app.pdf_extraction import ImageMeta
 from app.prompts import INGESTION_AGENT_SYSTEM_PROMPT
 from app.schemas import PdfDigestSchema
@@ -46,6 +47,7 @@ class _IngestionRunState:
 def _build_tools(
     session: Session,
     company_id: str,
+    pdf_digest_id: int,
     image_map: dict[str, ImageMeta],
     run_state: _IngestionRunState,
 ):
@@ -58,9 +60,10 @@ def _build_tools(
         if run_state.submitted:
             return "[error] submit_digest already called; no further tool calls allowed."
 
-        # Idempotency: a repeat call for an already-described image returns the cached row.
+        # Idempotency within this run only: image_id is stable per-run, not
+        # company-wide, so caching is scoped to this run's pdf_digest_id.
         cached = session.exec(
-            select(Image).where(Image.company_id == company_id, Image.image_id == image_id)
+            select(Image).where(Image.pdf_digest_id == pdf_digest_id, Image.image_id == image_id)
         ).first()
         if cached is not None:
             return f"type: {cached.tag.value} | summary: {cached.description}"
@@ -84,6 +87,7 @@ def _build_tools(
         # Durability boundary: persist immediately, independent of the outer graph run.
         image_row = Image(
             company_id=company_id,
+            pdf_digest_id=pdf_digest_id,
             image_id=image_id,
             file_path=meta.file_path,
             page_number=meta.page_number,
@@ -110,6 +114,7 @@ def run_ingestion_agent(
     transcript: str,
     session: Session,
     company_id: str,
+    pdf_digest_id: int,
     image_map: dict[str, ImageMeta],
 ) -> tuple[PdfDigestSchema, int, bool]:
     """Runs the tool-calling ingestion agent to completion.
@@ -117,12 +122,15 @@ def run_ingestion_agent(
     Returns (digest, images_reviewed, images_cap_hit).
     """
     run_state = _IngestionRunState()
-    tools = _build_tools(session, company_id, image_map, run_state)
+    tools = _build_tools(session, company_id, pdf_digest_id, image_map, run_state)
     model = get_chat_anthropic(temperature=0)
     system_prompt = INGESTION_AGENT_SYSTEM_PROMPT.format(transcript=transcript)
 
     agent = create_react_agent(model, tools, prompt=system_prompt)
-    agent.invoke({"messages": [{"role": "user", "content": "Begin reviewing the transcript."}]})
+    agent.invoke(
+        {"messages": [{"role": "user", "content": "Begin reviewing the transcript."}]},
+        config={"callbacks": get_langfuse_callbacks()},
+    )
 
     if not run_state.submitted or run_state.digest is None:
         logger.error("Ingestion agent for company_id=%s did not submit a digest", company_id)

@@ -128,11 +128,10 @@ class ArticleSchema(BaseModel):
 
 class ContextUploadResponse(BaseModel):
     company_id: str
-    role: str
-    page_count: int
-    images_extracted: int
-    images_described: int
-    digest_preview: str
+    page_count: Optional[int] = None
+    images_extracted: Optional[int] = None
+    images_described: Optional[int] = None
+    digest_preview: Optional[str] = None
     profile_summary: str
     web_sources: list[str]
 
@@ -173,6 +172,7 @@ class GenerateResponse(BaseModel):
 
 
 class CompanyProfileResponse(BaseModel):
+    id: int
     company_id: str
     offerings: str
     industry: str

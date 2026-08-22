@@ -19,7 +19,14 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import TodoListMiddleware
 
 from app.llm import get_chat_anthropic
-from app.prompts import COMPANY_RESEARCH_SUBAGENT_PROMPT, DEEP_RESEARCH_SYSTEM_PROMPT, DEEP_RESEARCH_USER_PROMPT
+from app.observability import get_langfuse_callbacks
+from app.prompts import (
+    COMPANY_RESEARCH_SUBAGENT_PROMPT,
+    DEEP_RESEARCH_SYSTEM_PROMPT,
+    DEEP_RESEARCH_USER_PROMPT,
+    NO_DESCRIPTION_PLACEHOLDER,
+    NO_PDF_DIGEST_PLACEHOLDER,
+)
 from app.schemas import CompanyProfileSchema, PdfDigestSchema
 
 logger = logging.getLogger(__name__)
@@ -45,15 +52,30 @@ def _build_agent():
     )
 
 
-def research_company_profile(digest: PdfDigestSchema) -> CompanyProfileSchema:
+def research_company_profile(
+    name: str, digest: PdfDigestSchema | None = None, description: str | None = None
+) -> CompanyProfileSchema:
     agent = _build_agent()
+
+    if digest is not None:
+        pdf_section = (
+            f"Document type: {digest.document_type}\n"
+            f"Digest: {digest.digest_text}\n"
+            f"Key facts: {', '.join(digest.key_facts)}"
+        )
+    else:
+        pdf_section = NO_PDF_DIGEST_PLACEHOLDER
+
+    description_section = description if description else NO_DESCRIPTION_PLACEHOLDER
+
     prompt = DEEP_RESEARCH_USER_PROMPT.format(
-        document_type=digest.document_type,
-        digest_text=digest.digest_text,
-        key_facts=", ".join(digest.key_facts),
+        name=name, pdf_section=pdf_section, description_section=description_section
     )
 
-    result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": prompt}]},
+        config={"callbacks": get_langfuse_callbacks()},
+    )
 
     profile = result.get("structured_response")
     if profile is None:
