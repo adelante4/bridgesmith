@@ -10,10 +10,11 @@ import io
 import logging
 import mimetypes
 
+from langchain_core.runnables import RunnableConfig
 from PIL import Image as PILImage
 
 from app.llm import get_chat_anthropic
-from app.observability import get_langfuse_callbacks
+from app.observability import new_trace_config
 from app.prompts import VISION_SUBAGENT_PROMPT
 from app.schemas import ImageDescription
 
@@ -36,7 +37,12 @@ def _downsize(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
     return buf.getvalue(), "image/png"
 
 
-def describe_image_subagent(image_path: str, context_hint: str) -> ImageDescription:
+def describe_image_subagent(
+    image_path: str, context_hint: str, config: RunnableConfig | None = None
+) -> ImageDescription:
+    """`config` should be the caller's RunnableConfig, threaded down so this call
+    nests under the caller's Langfuse trace. Falls back to a fresh (root) trace
+    only for standalone/direct calls outside the ingestion agent."""
     with open(image_path, "rb") as f:
         image_bytes = f.read()
 
@@ -58,7 +64,7 @@ def describe_image_subagent(image_path: str, context_hint: str) -> ImageDescript
         ],
     }
 
-    result = model.invoke([message], config={"callbacks": get_langfuse_callbacks()})
+    result = model.invoke([message], config=config or new_trace_config())
     return result
 
 

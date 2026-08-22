@@ -9,13 +9,14 @@ requests.
 import logging
 import threading
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from sqlmodel import Session, select
 
 from app.llm import get_chat_anthropic
 from app.models import Image, ImageTag
-from app.observability import get_langfuse_callbacks
+from app.observability import new_trace_config
 from app.pdf_extraction import ImageMeta
 from app.prompts import INGESTION_AGENT_SYSTEM_PROMPT
 from app.schemas import PdfDigestSchema
@@ -51,6 +52,7 @@ def _build_tools(
     pdf_digest_id: int,
     image_map: dict[str, ImageMeta],
     run_state: _IngestionRunState,
+    config: RunnableConfig,
 ):
     # create_react_agent's ToolNode runs multiple tool calls from one LLM turn
     # concurrently in worker threads. The sqlite3 connection (check_same_thread=
@@ -87,7 +89,9 @@ def _build_tools(
 
             run_state.vision_calls_made += 1
 
-        description = describe_image_subagent(meta.file_path, context_hint)
+        # Same config as the outer agent.invoke — nests this vision sub-call as a
+        # child span of the ingestion agent's trace instead of a disconnected root.
+        description = describe_image_subagent(meta.file_path, context_hint, config=config)
 
         tag = _IMAGE_TYPE_TO_TAG.get(description.image_type, ImageTag.generic)
         stored_description = description.summary
@@ -127,20 +131,27 @@ def run_ingestion_agent(
     company_id: str,
     pdf_digest_id: int,
     image_map: dict[str, ImageMeta],
+    config: RunnableConfig | None = None,
 ) -> tuple[PdfDigestSchema, int, bool]:
     """Runs the tool-calling ingestion agent to completion.
 
+    `config` should be the caller's RunnableConfig, threaded down so this agent's
+    (and its describe_image tool's nested vision calls') spans nest under the
+    caller's Langfuse trace. Falls back to a fresh (root) trace only for
+    standalone/direct calls outside the ingestion graph.
+
     Returns (digest, images_reviewed, images_cap_hit).
     """
+    config = config or new_trace_config()
     run_state = _IngestionRunState()
-    tools = _build_tools(session, company_id, pdf_digest_id, image_map, run_state)
+    tools = _build_tools(session, company_id, pdf_digest_id, image_map, run_state, config)
     model = get_chat_anthropic(temperature=0)
     system_prompt = INGESTION_AGENT_SYSTEM_PROMPT.format(transcript=transcript)
 
     agent = create_react_agent(model, tools, prompt=system_prompt)
     agent.invoke(
         {"messages": [{"role": "user", "content": "Begin reviewing the transcript."}]},
-        config={"callbacks": get_langfuse_callbacks()},
+        config=config,
     )
 
     if not run_state.submitted or run_state.digest is None:

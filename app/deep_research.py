@@ -17,9 +17,10 @@ import logging
 
 from deepagents import create_deep_agent
 from langchain.agents.middleware import TodoListMiddleware
+from langchain_core.runnables import RunnableConfig
 
 from app.llm import get_chat_anthropic
-from app.observability import get_langfuse_callbacks
+from app.observability import new_trace_config
 from app.prompts import (
     COMPANY_RESEARCH_SUBAGENT_PROMPT,
     DEEP_RESEARCH_SYSTEM_PROMPT,
@@ -53,9 +54,16 @@ def _build_agent():
 
 
 def research_company_profile(
-    name: str, digest: PdfDigestSchema | None = None, description: str | None = None
+    name: str,
+    digest: PdfDigestSchema | None = None,
+    description: str | None = None,
+    config: RunnableConfig | None = None,
 ) -> CompanyProfileSchema:
+    """`config` should be the caller's RunnableConfig, threaded down so this agent's
+    spans nest under the caller's Langfuse trace. Falls back to a fresh (root)
+    trace only for standalone/direct calls outside the ingestion graph."""
     agent = _build_agent()
+    config = config or new_trace_config()
 
     if digest is not None:
         pdf_section = (
@@ -74,7 +82,7 @@ def research_company_profile(
 
     result = agent.invoke(
         {"messages": [{"role": "user", "content": prompt}]},
-        config={"callbacks": get_langfuse_callbacks()},
+        config=config,
     )
 
     profile = result.get("structured_response")

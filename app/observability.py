@@ -47,7 +47,19 @@ def init_langfuse() -> None:
 
 
 def get_langfuse_callbacks() -> list:
-    """Callback list to pass as config={"callbacks": ...} at each LLM/agent invoke site."""
+    """Fresh callback handler — starts a NEW root trace. Call this exactly ONCE per
+    top-level request (a route handler, before invoking its graph/agent), never at
+    a nested call site. The langfuse CallbackHandler tracks parent/child run_ids on
+    the instance itself, so nested LLM calls must reuse that same instance (thread
+    it through as a RunnableConfig / explicit `config` param) to land as child spans
+    of that one trace instead of becoming their own disconnected root traces."""
     if not _ENABLED:
         return []
     return [GenerationsOnlyCallbackHandler()]
+
+
+def new_trace_config() -> dict:
+    """RunnableConfig carrying one fresh callback handler — build once per top-level
+    request and pass down through every nested .invoke()/node so the whole call tree
+    lands as one Langfuse trace."""
+    return {"callbacks": get_langfuse_callbacks()}
