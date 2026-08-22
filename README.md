@@ -93,7 +93,19 @@ Per the challenge brief, deliberately not built:
 - Auth / multi-tenancy enforcement.
 - A full automated test suite (a few smoke tests are included, non-blocking — see below).
 - Real image generation — placeholders reference extracted assets or a `stock_query` hint.
-- A frontend UI — `/docs` (FastAPI's OpenAPI UI) is the demo surface.
+
+A minimal Streamlit backoffice is included for browsing stored companies and driving `/context`/`/generate` (see below) — `/docs` (FastAPI's OpenAPI UI) remains the API demo surface.
+
+## Backoffice UI
+
+A Streamlit app for browsing companies (profiles, PDF digests, extracted images), triggering `/context` uploads and `/generate` calls, and reviewing past generated articles — reads the SQLite DB directly and calls the API over HTTP.
+
+```bash
+uvicorn app.main:app --reload &      # API must be running for Generate/Upload pages
+streamlit run backoffice/app.py
+```
+
+Opens at `http://localhost:8501`. Set `API_URL` if the API isn't at `http://localhost:8000`; `DATA_DIR` must match the API's (default `data`).
 
 ## Tests
 
@@ -124,6 +136,7 @@ app/
   routes/
     context.py                POST /context
     generate.py                POST /generate
+backoffice/app.py             Streamlit backoffice UI
 config/templates/            layout template configs (fixed input contract)
 data/                          gitignored: sqlite db + extracted assets
 docs/architecture.md          AWS cloud architecture design (not deployed)
