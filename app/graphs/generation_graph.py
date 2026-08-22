@@ -6,12 +6,13 @@ import json
 import logging
 from typing import Any, Literal, TypedDict
 
-from langchain_core.runnables import RunnableConfig
+from langfuse import observe
 from sqlmodel import Session, select
 
 from app.llm import GENERATION_MODEL_ENV, get_agent_model
 from app.models import CompanyProfile as CompanyProfileRow
 from app.models import Image
+from app.observability import new_trace_config
 from app.prompts import (
     GENERATE_DRAFT_SYSTEM_PROMPT,
     GENERATE_DRAFT_USER_PROMPT,
@@ -101,6 +102,7 @@ def _latest_profile(session: Session, company_id: str) -> CompanyProfileRow | No
 
 
 def make_load_profiles_node(session: Session):
+    @observe(name="load_profiles", capture_input=False, capture_output=False)
     def load_profiles_node(state: GenerationState) -> dict:
         sender_row = _latest_profile(session, state["sender_id"])
         if sender_row is None:
@@ -121,6 +123,7 @@ def make_load_profiles_node(session: Session):
     return load_profiles_node
 
 
+@observe(name="build_prompt", capture_input=False, capture_output=False)
 def build_prompt_node(state: GenerationState) -> dict:
     template = state["template"]
     fields = template.fields
@@ -145,22 +148,23 @@ def build_prompt_node(state: GenerationState) -> dict:
     return {"generate_user_prompt": user_prompt}
 
 
-def generate_draft_node(state: GenerationState, config: RunnableConfig) -> dict:
+@observe(name="generate_draft", capture_input=False, capture_output=False)
+def generate_draft_node(state: GenerationState) -> dict:
     # Fresh, clean model instance — deliberately no tools bound (see spec §3.2).
-    # `config` is the RunnableConfig LangGraph passed into graph.invoke() at the
-    # route handler — reusing it (rather than minting a new callback handler here)
-    # keeps this span nested under that one request's Langfuse trace.
+    # A fresh callback handler nests under whatever Langfuse span is current
+    # (this node's @observe span) via OTEL context — no manual config threading.
     model = get_agent_model(GENERATION_MODEL_ENV, temperature=0.4).with_structured_output(ArticleSchema)
     draft = model.invoke(
         [
             {"role": "system", "content": GENERATE_DRAFT_SYSTEM_PROMPT},
             {"role": "user", "content": state["generate_user_prompt"]},
         ],
-        config=config,
+        config=new_trace_config(),
     )
     return {"draft": draft, "repair_attempts": 0}
 
 
+@observe(name="validate", capture_input=False, capture_output=False)
 def validate_node(state: GenerationState) -> dict:
     template = state["template"]
     draft = state["draft"]
@@ -212,7 +216,8 @@ def should_repair(state: GenerationState) -> Literal["repair", "select_assets"]:
     return "select_assets"
 
 
-def repair_node(state: GenerationState, config: RunnableConfig) -> dict:
+@observe(name="repair", capture_input=False, capture_output=False)
+def repair_node(state: GenerationState) -> dict:
     draft = state["draft"]
     template = state["template"]
     errors = state["validation_errors"]
@@ -248,7 +253,7 @@ def repair_node(state: GenerationState, config: RunnableConfig) -> dict:
                 {"role": "system", "content": REPAIR_FIELD_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            config=config,
+            config=new_trace_config(),
         )
         new_text = _flatten_content(result.content).strip()
 
@@ -298,6 +303,7 @@ def _match_image(slot: str, alt_text: str, images: list[Image]) -> Image | None:
 
 
 def make_select_assets_node(session: Session):
+    @observe(name="select_assets", capture_input=False, capture_output=False)
     def select_assets_node(state: GenerationState) -> dict:
         template = state["template"]
         draft = state["draft"]
