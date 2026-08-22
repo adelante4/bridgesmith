@@ -8,6 +8,7 @@ from sqlmodel import Session
 from app.db import get_session
 from app.graphs.generation_graph import CompanyNotFoundError, build_generation_graph
 from app.models import GeneratedArticle
+from app.observability import new_trace_config
 from app.schemas import GenerateRequest, GenerateResponse
 from app.templates import TemplateNotFoundError, load_template
 
@@ -31,7 +32,7 @@ def generate_article(request: GenerateRequest, session: Session = Depends(get_se
     }
 
     try:
-        final_state = graph.invoke(initial_state)
+        final_state = graph.invoke(initial_state, config=new_trace_config())
     except CompanyNotFoundError as e:
         raise HTTPException(404, str(e)) from e
     except Exception as e:

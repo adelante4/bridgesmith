@@ -6,6 +6,7 @@ import json
 import logging
 from typing import TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from sqlmodel import Session
 
 from app.deep_research import research_company_profile
@@ -66,9 +67,14 @@ def make_create_digest_shell_node(session: Session):
 
 
 def make_ingestion_agent_node(session: Session):
-    def ingestion_agent_node(state: IngestionState) -> dict:
+    def ingestion_agent_node(state: IngestionState, config: RunnableConfig) -> dict:
         digest, images_reviewed, cap_hit = run_ingestion_agent(
-            state["annotated_transcript"], session, state["company_id"], state["digest_id"], state["image_map"]
+            state["annotated_transcript"],
+            session,
+            state["company_id"],
+            state["digest_id"],
+            state["image_map"],
+            config=config,
         )
         return {"digest": digest, "images_reviewed": images_reviewed, "images_cap_hit": cap_hit}
 
@@ -94,7 +100,7 @@ def make_persist_digest_node(session: Session):
     return persist_digest_node
 
 
-def profile_company_node(state: IngestionState) -> dict:
+def profile_company_node(state: IngestionState, config: RunnableConfig) -> dict:
     # LangChain deep research agent (deepagents.create_deep_agent): plans with a
     # todo list, delegates to a company-research-agent sub-agent bound to
     # Anthropic's native web_search tool, and returns a CompanyProfileSchema via
@@ -104,6 +110,7 @@ def profile_company_node(state: IngestionState) -> dict:
         name=state.get("name") or state["company_id"],
         digest=state.get("digest"),
         description=state.get("description"),
+        config=config,
     )
     return {"profile": profile}
 

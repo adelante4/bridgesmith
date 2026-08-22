@@ -11,6 +11,7 @@ from sqlmodel import Session
 from app.db import get_session
 from app.graphs.ingestion_graph import build_ingestion_graph
 from app.models import Company
+from app.observability import new_trace_config
 from app.schemas import ContextUploadResponse
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ async def upload_context(
     }
 
     try:
-        final_state = graph.invoke(initial_state)
+        final_state = graph.invoke(initial_state, config=new_trace_config())
     except fitz.FileDataError as e:
         logger.exception("PDF extraction failed for company_id=%s", resolved_company_id)
         raise HTTPException(500, f"PDF extraction failed: {e}") from e

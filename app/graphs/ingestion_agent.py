@@ -7,14 +7,16 @@ requests.
 """
 
 import logging
+import threading
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from sqlmodel import Session, select
 
 from app.llm import get_chat_anthropic
 from app.models import Image, ImageTag
-from app.observability import get_langfuse_callbacks
+from app.observability import new_trace_config
 from app.pdf_extraction import ImageMeta
 from app.prompts import INGESTION_AGENT_SYSTEM_PROMPT
 from app.schemas import PdfDigestSchema
@@ -50,7 +52,15 @@ def _build_tools(
     pdf_digest_id: int,
     image_map: dict[str, ImageMeta],
     run_state: _IngestionRunState,
+    config: RunnableConfig,
 ):
+    # create_react_agent's ToolNode runs multiple tool calls from one LLM turn
+    # concurrently in worker threads. The sqlite3 connection (check_same_thread=
+    # False) tolerates cross-thread use but not *concurrent* use, so unlocked
+    # access here corrupts the cursor (sqlite3.InterfaceError: bad parameter or
+    # other API misuse). Serialize all session access per run.
+    session_lock = threading.Lock()
+
     @tool
     def describe_image(image_id: str, context_hint: str) -> str:
         """Describe an image from the document. Call for images materially relevant
@@ -60,42 +70,47 @@ def _build_tools(
         if run_state.submitted:
             return "[error] submit_digest already called; no further tool calls allowed."
 
-        # Idempotency within this run only: image_id is stable per-run, not
-        # company-wide, so caching is scoped to this run's pdf_digest_id.
-        cached = session.exec(
-            select(Image).where(Image.pdf_digest_id == pdf_digest_id, Image.image_id == image_id)
-        ).first()
-        if cached is not None:
-            return f"type: {cached.tag.value} | summary: {cached.description}"
+        with session_lock:
+            # Idempotency within this run only: image_id is stable per-run, not
+            # company-wide, so caching is scoped to this run's pdf_digest_id.
+            cached = session.exec(
+                select(Image).where(Image.pdf_digest_id == pdf_digest_id, Image.image_id == image_id)
+            ).first()
+            if cached is not None:
+                return f"type: {cached.tag.value} | summary: {cached.description}"
 
-        if run_state.vision_calls_made >= MAX_DESCRIBE_IMAGE_CALLS:
-            run_state.cap_hit = True
-            return "[cap reached] descriptions unavailable for further images; proceed to submit_digest."
+            if run_state.vision_calls_made >= MAX_DESCRIBE_IMAGE_CALLS:
+                run_state.cap_hit = True
+                return "[cap reached] descriptions unavailable for further images; proceed to submit_digest."
 
-        meta = image_map.get(image_id)
-        if meta is None:
-            return f"[error] unknown image_id '{image_id}'"
+            meta = image_map.get(image_id)
+            if meta is None:
+                return f"[error] unknown image_id '{image_id}'"
 
-        description = describe_image_subagent(meta.file_path, context_hint)
-        run_state.vision_calls_made += 1
+            run_state.vision_calls_made += 1
+
+        # Same config as the outer agent.invoke — nests this vision sub-call as a
+        # child span of the ingestion agent's trace instead of a disconnected root.
+        description = describe_image_subagent(meta.file_path, context_hint, config=config)
 
         tag = _IMAGE_TYPE_TO_TAG.get(description.image_type, ImageTag.generic)
         stored_description = description.summary
         if description.visible_text:
             stored_description += f" | visible_text: {description.visible_text}"
 
-        # Durability boundary: persist immediately, independent of the outer graph run.
-        image_row = Image(
-            company_id=company_id,
-            pdf_digest_id=pdf_digest_id,
-            image_id=image_id,
-            file_path=meta.file_path,
-            page_number=meta.page_number,
-            description=stored_description,
-            tag=tag,
-        )
-        session.add(image_row)
-        session.commit()
+        with session_lock:
+            # Durability boundary: persist immediately, independent of the outer graph run.
+            image_row = Image(
+                company_id=company_id,
+                pdf_digest_id=pdf_digest_id,
+                image_id=image_id,
+                file_path=meta.file_path,
+                page_number=meta.page_number,
+                description=stored_description,
+                tag=tag,
+            )
+            session.add(image_row)
+            session.commit()
 
         return format_description_for_tool_result(description)
 
@@ -116,20 +131,27 @@ def run_ingestion_agent(
     company_id: str,
     pdf_digest_id: int,
     image_map: dict[str, ImageMeta],
+    config: RunnableConfig | None = None,
 ) -> tuple[PdfDigestSchema, int, bool]:
     """Runs the tool-calling ingestion agent to completion.
 
+    `config` should be the caller's RunnableConfig, threaded down so this agent's
+    (and its describe_image tool's nested vision calls') spans nest under the
+    caller's Langfuse trace. Falls back to a fresh (root) trace only for
+    standalone/direct calls outside the ingestion graph.
+
     Returns (digest, images_reviewed, images_cap_hit).
     """
+    config = config or new_trace_config()
     run_state = _IngestionRunState()
-    tools = _build_tools(session, company_id, pdf_digest_id, image_map, run_state)
+    tools = _build_tools(session, company_id, pdf_digest_id, image_map, run_state, config)
     model = get_chat_anthropic(temperature=0)
     system_prompt = INGESTION_AGENT_SYSTEM_PROMPT.format(transcript=transcript)
 
     agent = create_react_agent(model, tools, prompt=system_prompt)
     agent.invoke(
         {"messages": [{"role": "user", "content": "Begin reviewing the transcript."}]},
-        config={"callbacks": get_langfuse_callbacks()},
+        config=config,
     )
 
     if not run_state.submitted or run_state.digest is None:
