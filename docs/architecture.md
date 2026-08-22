@@ -2,6 +2,8 @@
 
 Not deployed — design only. Maps the prototype's SQLite/local-filesystem/synchronous design onto managed AWS services for production. See `spec.md` §11 for the source of this content.
 
+For the actual LangGraph node/edge shape being deployed here, see [`docs/graphs.md`](graphs.md).
+
 ## API layer
 
 API Gateway → Lambda, or Fargate if cold-start/latency from LangGraph's import weight becomes an issue. **Decision point to flag:** Fargate is likely the safer real answer given how heavy LangChain's import graph is — worth validating cold-start numbers before committing to Lambda for the API layer itself (the async ingestion worker, below, is a better fit for Lambda regardless).
