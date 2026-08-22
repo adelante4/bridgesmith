@@ -2,12 +2,21 @@
 docker-compose.yml — see README's Langfuse section. No-ops if
 LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY aren't set, so this is safe to leave
 wired in for environments that don't run the local stack.
+
+Tracing shape: one root span per API call (started here via `traced_route`,
+which becomes the trace root), one child span per LangGraph node (via the
+`@observe` decorator on each node function), and GENERATION spans for actual
+LLM calls nested under whichever span is current when the call happens.
+Nesting is carried by Langfuse's OTEL context, not by threading a shared
+CallbackHandler/RunnableConfig through the graph — any node can call
+`get_langfuse_callbacks()` fresh and it lands in the right place.
 """
 
 import logging
 import os
+from contextlib import contextmanager
 
-from langfuse import Langfuse
+from langfuse import Langfuse, get_client
 from langfuse.langchain import CallbackHandler as _LangchainCallbackHandler
 
 logger = logging.getLogger(__name__)
@@ -18,9 +27,12 @@ _client: Langfuse | None = None
 
 class GenerationsOnlyCallbackHandler(_LangchainCallbackHandler):
     """Suppresses CHAIN-type observations (RunnableSequence, ChatPromptTemplate,
-    create_react_agent's internal graph, ...), keeping only GENERATION spans for
-    actual LLM calls. Without this, LangGraph/LangChain's node-wrapping inflates
-    each trace 5-10x with duplicate copies of the same prompt."""
+    create_react_agent's/deepagents' internal graph, ...), keeping only
+    GENERATION spans for actual LLM calls. Without this, LangChain's
+    node-wrapping inflates each trace 5-10x with duplicate copies of the same
+    prompt. Graph-level structure (which node ran, in what order) is carried
+    by the `@observe`-decorated node functions instead, not by these chain
+    spans."""
 
     def on_chain_start(self, serialized, inputs, *, run_id, parent_run_id=None, tags=None, metadata=None, **kwargs):
         self._child_to_parent_run_id_map[run_id] = parent_run_id
@@ -47,19 +59,34 @@ def init_langfuse() -> None:
 
 
 def get_langfuse_callbacks() -> list:
-    """Fresh callback handler — starts a NEW root trace. Call this exactly ONCE per
-    top-level request (a route handler, before invoking its graph/agent), never at
-    a nested call site. The langfuse CallbackHandler tracks parent/child run_ids on
-    the instance itself, so nested LLM calls must reuse that same instance (thread
-    it through as a RunnableConfig / explicit `config` param) to land as child spans
-    of that one trace instead of becoming their own disconnected root traces."""
+    """Fresh callback handler for one LLM/agent invocation. Safe to call at any
+    nested call site (node function, tool, sub-agent): with no explicit
+    trace_context, it attaches its GENERATION spans under whatever Langfuse
+    span is current in the OTEL context (the enclosing `traced_route` /
+    `@observe` span), so no manual threading is required for correct nesting."""
     if not _ENABLED:
         return []
     return [GenerationsOnlyCallbackHandler()]
 
 
 def new_trace_config() -> dict:
-    """RunnableConfig carrying one fresh callback handler — build once per top-level
-    request and pass down through every nested .invoke()/node so the whole call tree
-    lands as one Langfuse trace."""
+    """RunnableConfig carrying a fresh callback handler for a single .invoke()
+    call. Nesting under the enclosing trace/span is automatic (see
+    get_langfuse_callbacks) — this no longer needs to be the same instance
+    threaded through the whole call tree."""
     return {"callbacks": get_langfuse_callbacks()}
+
+
+@contextmanager
+def traced_route(name: str, **trace_attrs):
+    """Wrap a top-level route handler's body in this to start ONE root trace
+    for the whole request — every `@observe`-decorated graph node and every
+    GENERATION spun up underneath (however deep) nests as its child/descendant
+    instead of becoming its own disconnected root trace. No-op if Langfuse
+    isn't enabled."""
+    if not _ENABLED:
+        yield
+        return
+    with get_client().start_as_current_observation(as_type="span", name=name) as span:
+        span.update_trace(name=name, **trace_attrs)
+        yield
