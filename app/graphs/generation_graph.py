@@ -6,12 +6,12 @@ import json
 import logging
 from typing import Any, Literal, TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from sqlmodel import Session, select
 
 from app.llm import get_provider_agnostic_model
 from app.models import CompanyProfile as CompanyProfileRow
 from app.models import Image
-from app.observability import get_langfuse_callbacks
 from app.prompts import GENERATE_DRAFT_SYSTEM_PROMPT, REPAIR_FIELD_PROMPT
 from app.schemas import (
     ArticleSchema,
@@ -140,12 +140,15 @@ def build_prompt_node(state: GenerationState) -> dict:
     return {"system_prompt": system_prompt}
 
 
-def generate_draft_node(state: GenerationState) -> dict:
+def generate_draft_node(state: GenerationState, config: RunnableConfig) -> dict:
     # Fresh, clean model instance — deliberately no tools bound (see spec §3.2).
+    # `config` is the RunnableConfig LangGraph passed into graph.invoke() at the
+    # route handler — reusing it (rather than minting a new callback handler here)
+    # keeps this span nested under that one request's Langfuse trace.
     model = get_provider_agnostic_model(temperature=0.4).with_structured_output(ArticleSchema)
     draft = model.invoke(
         [{"role": "user", "content": state["system_prompt"]}],
-        config={"callbacks": get_langfuse_callbacks()},
+        config=config,
     )
     return {"draft": draft, "repair_attempts": 0}
 
@@ -201,7 +204,7 @@ def should_repair(state: GenerationState) -> Literal["repair", "select_assets"]:
     return "select_assets"
 
 
-def repair_node(state: GenerationState) -> dict:
+def repair_node(state: GenerationState, config: RunnableConfig) -> dict:
     draft = state["draft"]
     template = state["template"]
     errors = state["validation_errors"]
@@ -234,7 +237,7 @@ def repair_node(state: GenerationState) -> dict:
         )
         result = model.invoke(
             [{"role": "user", "content": prompt}],
-            config={"callbacks": get_langfuse_callbacks()},
+            config=config,
         )
         new_text = _flatten_content(result.content).strip()
 
