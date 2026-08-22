@@ -105,6 +105,13 @@ class ArticleSectionDraft(BaseModel):
 class ImagePlaceholderDraft(BaseModel):
     slot: str = Field(description="Image slot identifier matching the template's image_slots")
     alt_text: str = Field(description="Alt text describing the desired image for this slot")
+    asset_alias: Optional[str] = Field(
+        default=None,
+        description=(
+            "Alias of the chosen asset from the sender asset catalog (e.g. 'A2'), "
+            "or null when no listed asset fits and a stock image should be sourced instead"
+        ),
+    )
 
 
 class ArticleSchema(BaseModel):

@@ -92,8 +92,11 @@ Respect the template's word limits strictly. Only state claims supported by the 
 given — do not invent facts, statistics, or claims about either company; if you are unsure a claim is supported, \
 omit it.
 
-Produce one entry in image_placeholders for each requested image slot — each with a slot id and alt text \
-describing the ideal image for that slot; do not choose actual assets, that's handled separately."""
+Produce one entry in image_placeholders for each requested image slot — each with a slot id, alt text \
+describing the ideal image for that slot, and an asset_alias picked from the sender asset catalog when a listed \
+asset genuinely fits that slot (set asset_alias to null otherwise — a stock image will be sourced from the alt \
+text). Only use aliases that appear in the catalog. For the 'hero' slot, prefer a logo-tagged asset when one is \
+listed."""
 
 GENERATE_DRAFT_USER_PROMPT = """Sender profile:
 {sender_profile}
@@ -106,16 +109,17 @@ Creative brief from the requester: {user_prompt}
 Template constraints (respect these word limits strictly):
 {template_constraints}
 
-Image slots needing a placeholder entry: {image_slots}"""
+Image slots needing a placeholder entry: {image_slots}
 
+Sender asset catalog (choose asset_alias values from here, or null):
+{sender_assets}"""
 
-REPAIR_FIELD_SYSTEM_PROMPT = """You are editing one field of a B2B marketing article to fit a word-count limit. \
-Rewrite the given field to fit its limit — shortening or expanding as the stated limit requires — while \
-preserving the key claim(s). When expanding, elaborate on what the text already says; do not add new facts, \
-statistics, or claims. Return only the rewritten text for this field — no preamble, no explanation."""
+NO_ASSETS_PLACEHOLDER = "(none — no sender assets available; set asset_alias to null for every slot)"
 
-REPAIR_FIELD_USER_PROMPT = """The '{field_id}' field is {actual_words} words; the limit is {limit_kind} {limit} \
-words. Guidance for this field: {guidance}
+REPAIR_TURN_USER_PROMPT = """The article you produced has the following problems:
 
-Current text:
-{current_text}"""
+{violations}
+
+Re-emit the complete corrected article in the same structured format. Fix only the listed problems; copy every \
+other field verbatim from your previous version. When shortening or expanding a field, preserve its key claim(s) \
+and do not add new facts, statistics, or claims."""
