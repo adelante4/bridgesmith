@@ -102,7 +102,7 @@ A Streamlit app for browsing companies (profiles, PDF digests, extracted images)
 
 ```bash
 uvicorn app.main:app --reload &      # API must be running for Generate/Upload pages
-streamlit run backoffice/app.py
+streamlit run backoffice/streamlit_app.py
 ```
 
 Opens at `http://localhost:8501`. Set `API_URL` if the API isn't at `http://localhost:8000`; `DATA_DIR` must match the API's (default `data`).
@@ -136,7 +136,7 @@ app/
   routes/
     context.py                POST /context
     generate.py                POST /generate
-backoffice/app.py             Streamlit backoffice UI
+backoffice/streamlit_app.py             Streamlit backoffice UI
 config/templates/            layout template configs (fixed input contract)
 data/                          gitignored: sqlite db + extracted assets
 docs/architecture.md          AWS cloud architecture design (not deployed)

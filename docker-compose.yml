@@ -16,7 +16,7 @@ services:
 
   backoffice:
     build: .
-    command: ["streamlit", "run", "backoffice/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+    command: ["streamlit", "run", "backoffice/streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
     ports:
       - "8501:8501"
     env_file:
