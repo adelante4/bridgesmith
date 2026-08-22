@@ -135,10 +135,13 @@ def run_ingestion_agent(
 ) -> tuple[PdfDigestSchema, int, bool]:
     """Runs the tool-calling ingestion agent to completion.
 
-    `config` should be the caller's RunnableConfig, threaded down so this agent's
-    (and its describe_image tool's nested vision calls') spans nest under the
-    caller's Langfuse trace. Falls back to a fresh (root) trace only for
-    standalone/direct calls outside the ingestion graph.
+    Builds one RunnableConfig/callback handler here (nested under whatever
+    Langfuse span is current — the caller's @observe span — via OTEL context)
+    and threads that SAME instance explicitly into agent.invoke and the
+    describe_image tool closure. Explicit threading (not just ambient context)
+    is required here specifically because create_react_agent's ToolNode runs
+    tool calls concurrently in worker threads, and OTEL context vars don't
+    propagate across threads on their own.
 
     Returns (digest, images_reviewed, images_cap_hit).
     """
