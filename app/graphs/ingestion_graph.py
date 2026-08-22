@@ -6,7 +6,7 @@ import json
 import logging
 from typing import TypedDict
 
-from langchain_core.runnables import RunnableConfig
+from langfuse import observe
 from sqlmodel import Session
 
 from app.deep_research import research_company_profile
@@ -36,6 +36,7 @@ class IngestionState(TypedDict, total=False):
     profile_id: int
 
 
+@observe(name="extract_pdf_structure", capture_input=False, capture_output=False)
 def extract_pdf_structure_node(state: IngestionState) -> dict:
     result = extract_pdf_structure(state["pdf_bytes"], state["company_id"], state["assets_dir"])
     return {
@@ -52,6 +53,7 @@ def make_create_digest_shell_node(session: Session):
     run (see docs/adr/0001-...). digest_text/key_facts/document_type are filled
     in later by persist_digest, once submit_digest reports them."""
 
+    @observe(name="create_digest_shell", capture_input=False, capture_output=False)
     def create_digest_shell_node(state: IngestionState) -> dict:
         row = PdfDigest(
             company_id=state["company_id"],
@@ -67,14 +69,14 @@ def make_create_digest_shell_node(session: Session):
 
 
 def make_ingestion_agent_node(session: Session):
-    def ingestion_agent_node(state: IngestionState, config: RunnableConfig) -> dict:
+    @observe(name="ingestion_agent", capture_input=False, capture_output=False)
+    def ingestion_agent_node(state: IngestionState) -> dict:
         digest, images_reviewed, cap_hit = run_ingestion_agent(
             state["annotated_transcript"],
             session,
             state["company_id"],
             state["digest_id"],
             state["image_map"],
-            config=config,
         )
         return {"digest": digest, "images_reviewed": images_reviewed, "images_cap_hit": cap_hit}
 
@@ -82,6 +84,7 @@ def make_ingestion_agent_node(session: Session):
 
 
 def make_persist_digest_node(session: Session):
+    @observe(name="persist_digest", capture_input=False, capture_output=False)
     def persist_digest_node(state: IngestionState) -> dict:
         digest = state["digest"]
         row = session.get(PdfDigest, state["digest_id"])
@@ -100,7 +103,8 @@ def make_persist_digest_node(session: Session):
     return persist_digest_node
 
 
-def profile_company_node(state: IngestionState, config: RunnableConfig) -> dict:
+@observe(name="profile_company", capture_input=False, capture_output=False)
+def profile_company_node(state: IngestionState) -> dict:
     # LangChain deep research agent (deepagents.create_deep_agent): plans with a
     # todo list, delegates to a company-research-agent sub-agent bound to
     # Anthropic's native web_search tool, and returns a CompanyProfileSchema via
@@ -110,12 +114,12 @@ def profile_company_node(state: IngestionState, config: RunnableConfig) -> dict:
         name=state.get("name") or state["company_id"],
         digest=state.get("digest"),
         description=state.get("description"),
-        config=config,
     )
     return {"profile": profile}
 
 
 def make_persist_profile_node(session: Session):
+    @observe(name="persist_profile", capture_input=False, capture_output=False)
     def persist_profile_node(state: IngestionState) -> dict:
         profile = state["profile"]
 
