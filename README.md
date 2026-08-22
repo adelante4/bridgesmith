@@ -39,7 +39,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-SQLite database and extracted PDF assets persist under `./data` on the host (volume-mounted).
+SQLite database and extracted PDF assets persist under `./data` on the host (volume-mounted). The backoffice UI comes up alongside the API at `http://localhost:8501`.
 
 ## Langfuse (local LLM tracing)
 
