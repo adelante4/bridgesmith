@@ -18,7 +18,7 @@ from PIL import Image as PILImage
 
 from app.llm import VISION_MODEL_ENV, get_agent_model
 from app.observability import new_trace_config
-from app.prompts import VISION_SUBAGENT_PROMPT
+from app.prompts import VISION_SUBAGENT_SYSTEM_PROMPT, VISION_SUBAGENT_USER_PROMPT
 from app.schemas import ImageDescription
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,8 @@ def describe_image_subagent(
 
     # Standard content blocks (langchain-core v1) — translated by each chat model
     # integration to its own wire format, so this works across providers.
-    message = {
+    system_message = {"role": "system", "content": VISION_SUBAGENT_SYSTEM_PROMPT}
+    user_message = {
         "role": "user",
         "content": [
             {
@@ -67,11 +68,11 @@ def describe_image_subagent(
                 "data": b64_data,
                 "mime_type": media_type,
             },
-            {"type": "text", "text": VISION_SUBAGENT_PROMPT.format(context_hint=context_hint)},
+            {"type": "text", "text": VISION_SUBAGENT_USER_PROMPT.format(context_hint=context_hint)},
         ],
     }
 
-    result = model.invoke([message], config=config or new_trace_config())
+    result = model.invoke([system_message, user_message], config=config or new_trace_config())
     return result
 
 
