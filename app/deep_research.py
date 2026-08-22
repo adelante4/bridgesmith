@@ -58,9 +58,9 @@ def research_company_profile(
     description: str | None = None,
     config: RunnableConfig | None = None,
 ) -> CompanyProfileSchema:
-    """`config` should be the caller's RunnableConfig, threaded down so this agent's
-    spans nest under the caller's Langfuse trace. Falls back to a fresh (root)
-    trace only for standalone/direct calls outside the ingestion graph."""
+    """`config` optionally overrides the callback handler; when omitted, a fresh
+    one is built here and nests under whatever Langfuse span is current (the
+    caller's @observe span) via OTEL context."""
     agent = _build_agent()
     config = config or new_trace_config()
 
