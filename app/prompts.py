@@ -33,7 +33,10 @@ looking for.
 Once you have reviewed the whole transcript and described the images worth describing, call submit_digest with \
 your final structured summary. submit_digest is your ONLY way to finish this task — after calling it, do not call \
 any other tool. There is a hard cap of 15 describe_image calls; if you hit it, proceed straight to submit_digest \
-with what you have."""
+with what you have.
+
+Keep working through the entire transcript before calling submit_digest — do not stop partway through. Call \
+describe_image to check an image rather than guessing its content from the surrounding text alone."""
 
 INGESTION_AGENT_USER_PROMPT = """Transcript:
 {transcript}"""
@@ -51,7 +54,10 @@ positioning, recent news, industry context not already covered). If neither a PD
 supplied, research the company from its name alone via web search — do not invent document content that was never \
 given to you. Once research is back, verify it against whatever inputs were supplied and produce the final \
 structured company profile: offerings, industry, pain_points, tone_signals, summary, and web_sources — every URL \
-cited during research, with a short note on what it supports. Do not fabricate facts or sources."""
+cited during research, with a short note on what it supports. Do not fabricate facts or sources.
+
+Keep going until you have produced that final structured profile — delegating to the sub-agent is a step, not the \
+finish line; do not end your turn until every field is populated from real research."""
 
 DEEP_RESEARCH_USER_PROMPT = """Research and profile this company.
 
@@ -68,8 +74,8 @@ NO_DESCRIPTION_PLACEHOLDER = "(none — no description was provided for this run
 
 COMPANY_RESEARCH_SUBAGENT_PROMPT = """You are a focused company researcher. Given a company digest, use the \
 web_search tool to confirm and supplement it: current positioning, recent news, industry context not present in \
-the digest. Cite every URL you use. Report back a concise research summary with citations — do not fabricate \
-facts or sources."""
+the digest. Search rather than relying on what you already know — positioning and news go stale. Cite every URL \
+you use. Report back a concise research summary with citations — do not fabricate facts or sources."""
 
 
 GENERATE_DRAFT_SYSTEM_PROMPT = """You are writing a tailored B2B marketing article that bridges a Sender company \
