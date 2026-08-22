@@ -44,7 +44,7 @@ _COMPANY_RESEARCH_SUBAGENT = {
 
 def _build_agent():
     return create_deep_agent(
-        model=get_chat_anthropic(temperature=0),
+        model=get_chat_anthropic(),
         tools=[WEB_SEARCH_TOOL],
         system_prompt=DEEP_RESEARCH_SYSTEM_PROMPT,
         subagents=[_COMPANY_RESEARCH_SUBAGENT],
