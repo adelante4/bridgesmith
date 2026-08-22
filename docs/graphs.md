@@ -26,7 +26,7 @@ Runs on `POST /context`. `extract_pdf_structure` / `profile_company` fork depend
 
 ## Generation graph (`app/graphs/generation_graph.py`)
 
-Runs on `POST /generate`. `validate` loops back through `repair` up to `MAX_REPAIR_ATTEMPTS` (2) before falling through to `select_assets`.
+Runs on `POST /generate`. `validate` loops back through `repair` up to `MAX_REPAIR_ATTEMPTS` (2) before falling through to `finalize_article`.
 
 ![generation graph](graphs/generation_graph.png)
 
@@ -34,5 +34,5 @@ Runs on `POST /generate`. `validate` loops back through `repair` up to `MAX_REPA
 - `build_prompt` — assembles the system prompt from profiles, template word-limit/section constraints, and the user prompt.
 - `generate_draft` — clean model instance (no tools bound), structured output into `ArticleSchema`.
 - `validate` — checks word limits/min-lengths per field and required image slots.
-- `repair` — rewrites only the fields that failed validation; loops back to `validate`.
-- `select_assets` — truncates any field still over limit after repair attempts are exhausted, matches image placeholders to extracted `Image` rows or falls back to a stock-query hint.
+- `repair` — appends one turn to the draft conversation batching every current violation (word limits, missing sections/slots, invalid asset aliases) and re-emits the full corrected article; the stable conversation prefix makes each repair round an OpenAI prompt-cache hit. Loops back to `validate`.
+- `finalize_article` — truncates any field still over limit after repair attempts are exhausted, resolves the draft's chosen asset aliases to `Image` rows (sender assets only; the model picks from a catalog in its prompt) or falls back to a stock-query hint.

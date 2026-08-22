@@ -1,5 +1,5 @@
 """Generation LangGraph: load_profiles -> build_prompt -> generate_draft -> validate
--> (repair -> validate)* -> select_assets. See spec.md §3.2.
+-> (repair -> validate)* -> finalize_article. See spec.md §3.2.
 """
 
 import json
@@ -16,12 +16,11 @@ from app.observability import new_trace_config
 from app.prompts import (
     GENERATE_DRAFT_SYSTEM_PROMPT,
     GENERATE_DRAFT_USER_PROMPT,
-    REPAIR_FIELD_SYSTEM_PROMPT,
-    REPAIR_FIELD_USER_PROMPT,
+    NO_ASSETS_PLACEHOLDER,
+    REPAIR_TURN_USER_PROMPT,
 )
 from app.schemas import (
     ArticleSchema,
-    ArticleSectionDraft,
     CompanyProfileSchema,
     GenerateImagePlaceholder,
     GenerateSection,
@@ -52,7 +51,10 @@ class GenerationState(TypedDict, total=False):
     receiver_profile_id: int
     sender_pdf_digest_id: int
     receiver_pdf_digest_id: int
+    asset_catalog: dict[str, int]  # alias (e.g. "A2") -> Image.id
+    sender_assets_block: str
     generate_user_prompt: str
+    draft_messages: list  # system+user+assistant turns; repairs append here for prompt caching
     draft: ArticleSchema
     validation_errors: list[dict]
     repair_attempts: int
@@ -70,16 +72,6 @@ def _word_count(text: str) -> int:
 
 def _word_truncate(text: str, max_words: int) -> str:
     return " ".join(text.split()[:max_words])
-
-
-def _flatten_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content or []:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-    return "\n".join(parts)
 
 
 def _profile_row_to_schema(row: CompanyProfileRow) -> CompanyProfileSchema:
@@ -111,6 +103,29 @@ def make_load_profiles_node(session: Session):
         if receiver_row is None:
             raise CompanyNotFoundError(state["receiver_id"], "receiver")
 
+        # Sender-only asset catalog, scoped to the sender's latest ingestion run
+        # (matching the CompanyProfile just loaded — see docs/adr/0001-...).
+        # Every Image row was described at ingestion time, so the catalog only
+        # ever contains assets the draft model can reason about.
+        sender_images: list[Image] = []
+        if sender_row.pdf_digest_id is not None:
+            sender_images = list(
+                session.exec(
+                    select(Image)
+                    .where(Image.pdf_digest_id == sender_row.pdf_digest_id)
+                    .order_by(Image.id)
+                ).all()
+            )
+
+        asset_catalog = {f"A{i}": img.id for i, img in enumerate(sender_images, start=1)}
+        if sender_images:
+            sender_assets_block = "\n".join(
+                f"{alias}: [{img.tag.value}] {img.description}"
+                for alias, img in zip(asset_catalog, sender_images)
+            )
+        else:
+            sender_assets_block = NO_ASSETS_PLACEHOLDER
+
         return {
             "sender_profile": _profile_row_to_schema(sender_row),
             "receiver_profile": _profile_row_to_schema(receiver_row),
@@ -118,6 +133,8 @@ def make_load_profiles_node(session: Session):
             "receiver_profile_id": receiver_row.id,
             "sender_pdf_digest_id": sender_row.pdf_digest_id,
             "receiver_pdf_digest_id": receiver_row.pdf_digest_id,
+            "asset_catalog": asset_catalog,
+            "sender_assets_block": sender_assets_block,
         }
 
     return load_profiles_node
@@ -138,36 +155,52 @@ def build_prompt_node(state: GenerationState) -> dict:
     lines.append(f"pull_quote: max {fields.pull_quote.max_words} words")
     lines.append(f"cta: max {fields.cta.max_words} words")
 
+    # web_sources stay out of the prompt: the article can't cite URLs, and any
+    # fact worth using must already live in the profile's summary/offerings.
     user_prompt = GENERATE_DRAFT_USER_PROMPT.format(
-        sender_profile=state["sender_profile"].model_dump_json(),
-        receiver_profile=state["receiver_profile"].model_dump_json(),
+        sender_profile=state["sender_profile"].model_dump_json(exclude={"web_sources"}),
+        receiver_profile=state["receiver_profile"].model_dump_json(exclude={"web_sources"}),
         user_prompt=state["prompt"],
         template_constraints="\n".join(lines),
         image_slots=", ".join(template.image_slots),
+        sender_assets=state["sender_assets_block"],
     )
     return {"generate_user_prompt": user_prompt}
 
 
+def _draft_model():
+    # Fresh, clean model instance — deliberately no tools bound (see spec §3.2).
+    # include_raw keeps the assistant message so repair turns can extend the
+    # same conversation (stable prefix -> OpenAI prompt cache hits).
+    return get_agent_model(GENERATION_MODEL_ENV, temperature=0.4).with_structured_output(
+        ArticleSchema, include_raw=True
+    )
+
+
+def _invoke_draft(messages: list) -> tuple[ArticleSchema, Any]:
+    result = _draft_model().invoke(messages, config=new_trace_config())
+    if result.get("parsing_error") or result.get("parsed") is None:
+        raise RuntimeError(f"draft structured output failed to parse: {result.get('parsing_error')}")
+    return result["parsed"], result["raw"]
+
+
 @observe(name="generate_draft", capture_input=False, capture_output=False)
 def generate_draft_node(state: GenerationState) -> dict:
-    # Fresh, clean model instance — deliberately no tools bound (see spec §3.2).
     # A fresh callback handler nests under whatever Langfuse span is current
     # (this node's @observe span) via OTEL context — no manual config threading.
-    model = get_agent_model(GENERATION_MODEL_ENV, temperature=0.4).with_structured_output(ArticleSchema)
-    draft = model.invoke(
-        [
-            {"role": "system", "content": GENERATE_DRAFT_SYSTEM_PROMPT},
-            {"role": "user", "content": state["generate_user_prompt"]},
-        ],
-        config=new_trace_config(),
-    )
-    return {"draft": draft, "repair_attempts": 0}
+    messages = [
+        {"role": "system", "content": GENERATE_DRAFT_SYSTEM_PROMPT},
+        {"role": "user", "content": state["generate_user_prompt"]},
+    ]
+    draft, raw = _invoke_draft(messages)
+    return {"draft": draft, "draft_messages": messages + [raw], "repair_attempts": 0}
 
 
 @observe(name="validate", capture_input=False, capture_output=False)
 def validate_node(state: GenerationState) -> dict:
     template = state["template"]
     draft = state["draft"]
+    catalog = state["asset_catalog"]
     errors: list[dict] = []
 
     def check(field_id: str, text: str, max_words: int, min_words: int | None = None, guidance: str = ""):
@@ -202,111 +235,79 @@ def validate_node(state: GenerationState) -> dict:
     check("pull_quote", draft.pull_quote, template.fields.pull_quote.max_words)
     check("cta", draft.cta, template.fields.cta.max_words)
 
-    draft_slots = {p.slot for p in draft.image_placeholders}
+    draft_placeholders = {p.slot: p for p in draft.image_placeholders}
     for slot in template.image_slots:
-        if slot not in draft_slots:
-            errors.append({"field_id": f"image_slot:{slot}", "actual_words": 0, "limit": 0, "kind": "missing_slot", "guidance": ""})
+        placeholder = draft_placeholders.get(slot)
+        if placeholder is None:
+            errors.append(
+                {"field_id": f"image_slot:{slot}", "actual_words": 0, "limit": 0, "kind": "missing_slot", "guidance": ""}
+            )
+        elif placeholder.asset_alias is not None and placeholder.asset_alias not in catalog:
+            errors.append(
+                {
+                    "field_id": f"image_slot:{slot}",
+                    "actual_words": 0,
+                    "limit": 0,
+                    "kind": "invalid_asset",
+                    "guidance": "",
+                    "alias": placeholder.asset_alias,
+                }
+            )
 
     return {"validation_errors": errors}
 
 
-def should_repair(state: GenerationState) -> Literal["repair", "select_assets"]:
+def should_repair(state: GenerationState) -> Literal["repair", "finalize_article"]:
     if state["validation_errors"] and state["repair_attempts"] < MAX_REPAIR_ATTEMPTS:
         return "repair"
-    return "select_assets"
+    return "finalize_article"
+
+
+def _violation_line(err: dict) -> str:
+    field_id = err["field_id"]
+    kind = err["kind"]
+    guidance = f" Guidance: {err['guidance']}" if err.get("guidance") else ""
+    if kind == "max":
+        return f"- '{field_id}' is {err['actual_words']} words; the maximum is {err['limit']}.{guidance}"
+    if kind == "min":
+        return f"- '{field_id}' is {err['actual_words']} words; the minimum is {err['limit']}.{guidance}"
+    if kind == "missing":
+        return f"- section '{field_id}' is missing entirely; write it (max {err['limit']} words).{guidance}"
+    if kind == "missing_slot":
+        slot = field_id.removeprefix("image_slot:")
+        return f"- image_placeholders has no entry for slot '{slot}'; add one."
+    if kind == "invalid_asset":
+        slot = field_id.removeprefix("image_slot:")
+        return (
+            f"- image_placeholders entry for slot '{slot}' uses asset_alias '{err['alias']}', which is not in "
+            f"the sender asset catalog; pick a listed alias or set it to null."
+        )
+    return f"- '{field_id}': {kind}"
 
 
 @observe(name="repair", capture_input=False, capture_output=False)
 def repair_node(state: GenerationState) -> dict:
-    draft = state["draft"]
-    template = state["template"]
-    errors = state["validation_errors"]
-    model = get_agent_model(GENERATION_MODEL_ENV, temperature=0.2)
-
-    guidance_map = {s.id: s.guidance for s in template.fields.sections}
-    updated_sections = {s.id: s.text for s in draft.sections}
-    updated_top = {
-        "headline": draft.headline,
-        "subheadline": draft.subheadline,
-        "pull_quote": draft.pull_quote,
-        "cta": draft.cta,
+    # One appended turn per repair iteration, batching every current violation.
+    # Extending the same conversation keeps the (large) profile prompt a stable
+    # prefix, so OpenAI's prompt cache pays for each repair round.
+    violations = "\n".join(_violation_line(e) for e in state["validation_errors"])
+    messages = state["draft_messages"] + [
+        {"role": "user", "content": REPAIR_TURN_USER_PROMPT.format(violations=violations)}
+    ]
+    draft, raw = _invoke_draft(messages)
+    return {
+        "draft": draft,
+        "draft_messages": messages + [raw],
+        "repair_attempts": state["repair_attempts"] + 1,
     }
 
-    for err in errors:
-        field_id = err["field_id"]
-        if err["kind"] in ("missing", "missing_slot"):
-            continue  # not a word-limit rewrite case
-        current_text = updated_sections.get(field_id, updated_top.get(field_id))
-        if current_text is None:
-            continue
 
-        user_prompt = REPAIR_FIELD_USER_PROMPT.format(
-            field_id=field_id,
-            actual_words=err["actual_words"],
-            limit_kind=err["kind"],
-            limit=err["limit"],
-            guidance=guidance_map.get(field_id, ""),
-            current_text=current_text,
-        )
-        result = model.invoke(
-            [
-                {"role": "system", "content": REPAIR_FIELD_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            config=new_trace_config(),
-        )
-        new_text = _flatten_content(result.content).strip()
-
-        if field_id in updated_sections:
-            updated_sections[field_id] = new_text
-        else:
-            updated_top[field_id] = new_text
-
-    new_sections = [
-        ArticleSectionDraft(id=s.id, text=updated_sections.get(s.id, s.text)) for s in draft.sections
-    ]
-    new_draft = draft.model_copy(
-        update={
-            "headline": updated_top["headline"],
-            "subheadline": updated_top["subheadline"],
-            "pull_quote": updated_top["pull_quote"],
-            "cta": updated_top["cta"],
-            "sections": new_sections,
-        }
-    )
-
-    return {"draft": new_draft, "repair_attempts": state["repair_attempts"] + 1}
-
-
-_SLOT_TAG_HINTS = {"hero": "logo"}
-
-
-def _match_image(slot: str, alt_text: str, images: list[Image]) -> Image | None:
-    if not images:
-        return None
-
-    preferred_tag = _SLOT_TAG_HINTS.get(slot)
-    if preferred_tag:
-        for img in images:
-            if img.tag.value == preferred_tag:
-                return img
-
-    alt_words = {w.lower() for w in alt_text.split()}
-    best, best_score = None, 0
-    for img in images:
-        desc_words = {w.lower() for w in img.description.split()}
-        score = len(alt_words & desc_words)
-        if score > best_score:
-            best, best_score = img, score
-
-    return best if best_score > 0 else None
-
-
-def make_select_assets_node(session: Session):
-    @observe(name="select_assets", capture_input=False, capture_output=False)
-    def select_assets_node(state: GenerationState) -> dict:
+def make_finalize_article_node(session: Session):
+    @observe(name="finalize_article", capture_input=False, capture_output=False)
+    def finalize_article_node(state: GenerationState) -> dict:
         template = state["template"]
         draft = state["draft"]
+        catalog = state["asset_catalog"]
         error_by_field = {e["field_id"]: e for e in state["validation_errors"]}
 
         def finalize(field_id: str, text: str, max_words: int) -> tuple[str, bool]:
@@ -335,27 +336,27 @@ def make_select_assets_node(session: Session):
                 )
             )
 
-        # Scoped to each company's latest ingestion run only (matching the
-        # latest CompanyProfile just used) — see docs/adr/0001-....
-        sender_images = session.exec(
-            select(Image).where(Image.pdf_digest_id == state["sender_pdf_digest_id"])
-        ).all()
-        receiver_images = session.exec(
-            select(Image).where(Image.pdf_digest_id == state["receiver_pdf_digest_id"])
-        ).all()
-        all_images = list(sender_images) + list(receiver_images)
-
+        # The draft model picked asset aliases itself (from the sender-only
+        # catalog in its prompt); here we only resolve alias -> Image.id and
+        # fall back to a stock query when it picked none, the repair loop
+        # couldn't fix an invalid alias, or the slot never got an entry.
         draft_placeholders = {p.slot: p for p in draft.image_placeholders}
         image_placeholders = []
         for slot in template.image_slots:
             placeholder_draft = draft_placeholders.get(slot)
             alt_text = placeholder_draft.alt_text if placeholder_draft else slot
-            match = _match_image(slot, alt_text, all_images)
-            if match:
+            alias = placeholder_draft.asset_alias if placeholder_draft else None
+            if alias is not None and alias in catalog:
                 image_placeholders.append(
-                    GenerateImagePlaceholder(slot=slot, source_hint="asset", asset_id=match.id, alt_text=alt_text)
+                    GenerateImagePlaceholder(slot=slot, source_hint="asset", asset_id=catalog[alias], alt_text=alt_text)
                 )
             else:
+                if alias is not None:
+                    logger.warning(
+                        "slot '%s': asset_alias '%s' still invalid after repairs; falling back to stock query",
+                        slot,
+                        alias,
+                    )
                 image_placeholders.append(
                     GenerateImagePlaceholder(
                         slot=slot, source_hint="stock_query", alt_text=alt_text, stock_query=alt_text
@@ -371,7 +372,7 @@ def make_select_assets_node(session: Session):
             "image_placeholders": image_placeholders,
         }
 
-    return select_assets_node
+    return finalize_article_node
 
 
 def build_generation_graph(session: Session):
@@ -383,13 +384,15 @@ def build_generation_graph(session: Session):
     graph.add_node("generate_draft", generate_draft_node)
     graph.add_node("validate", validate_node)
     graph.add_node("repair", repair_node)
-    graph.add_node("select_assets", make_select_assets_node(session))
+    graph.add_node("finalize_article", make_finalize_article_node(session))
 
     graph.set_entry_point("load_profiles")
     graph.add_edge("load_profiles", "build_prompt")
     graph.add_edge("build_prompt", "generate_draft")
     graph.add_edge("generate_draft", "validate")
-    graph.add_conditional_edges("validate", should_repair, {"repair": "repair", "select_assets": "select_assets"})
+    graph.add_conditional_edges(
+        "validate", should_repair, {"repair": "repair", "finalize_article": "finalize_article"}
+    )
     graph.add_edge("repair", "validate")
 
     return graph.compile()

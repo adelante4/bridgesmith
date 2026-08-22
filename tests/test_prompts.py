@@ -36,19 +36,13 @@ def test_generate_draft_user_prompt_formats():
         user_prompt=BRACES,
         template_constraints="headline: max 12 words",
         image_slots="hero, inline_1",
+        sender_assets="A1: [logo] Acme company logo",
     )
     assert '{"offerings": "x"}' in out and BRACES in out
 
 
-def test_repair_field_user_prompt_formats():
-    out = prompts.REPAIR_FIELD_USER_PROMPT.format(
-        field_id="headline",
-        actual_words=20,
-        limit_kind="max",
-        limit=12,
-        guidance="",
-        current_text=BRACES,
-    )
+def test_repair_turn_user_prompt_formats():
+    out = prompts.REPAIR_TURN_USER_PROMPT.format(violations=BRACES)
     assert BRACES in out
 
 
@@ -61,7 +55,6 @@ def test_system_prompts_have_no_placeholders():
         "DEEP_RESEARCH_SYSTEM_PROMPT",
         "COMPANY_RESEARCH_SUBAGENT_PROMPT",
         "GENERATE_DRAFT_SYSTEM_PROMPT",
-        "REPAIR_FIELD_SYSTEM_PROMPT",
     ):
         text = getattr(prompts, name)
         assert "{" not in text and "}" not in text, f"{name} contains braces"
