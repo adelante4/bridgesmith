@@ -12,7 +12,12 @@ from sqlmodel import Session, select
 from app.llm import GENERATION_MODEL_ENV, get_agent_model
 from app.models import CompanyProfile as CompanyProfileRow
 from app.models import Image
-from app.prompts import GENERATE_DRAFT_SYSTEM_PROMPT, REPAIR_FIELD_PROMPT
+from app.prompts import (
+    GENERATE_DRAFT_SYSTEM_PROMPT,
+    GENERATE_DRAFT_USER_PROMPT,
+    REPAIR_FIELD_SYSTEM_PROMPT,
+    REPAIR_FIELD_USER_PROMPT,
+)
 from app.schemas import (
     ArticleSchema,
     ArticleSectionDraft,
@@ -46,7 +51,7 @@ class GenerationState(TypedDict, total=False):
     receiver_profile_id: int
     sender_pdf_digest_id: int
     receiver_pdf_digest_id: int
-    system_prompt: str
+    generate_user_prompt: str
     draft: ArticleSchema
     validation_errors: list[dict]
     repair_attempts: int
@@ -130,14 +135,14 @@ def build_prompt_node(state: GenerationState) -> dict:
     lines.append(f"pull_quote: max {fields.pull_quote.max_words} words")
     lines.append(f"cta: max {fields.cta.max_words} words")
 
-    system_prompt = GENERATE_DRAFT_SYSTEM_PROMPT.format(
+    user_prompt = GENERATE_DRAFT_USER_PROMPT.format(
         sender_profile=state["sender_profile"].model_dump_json(),
         receiver_profile=state["receiver_profile"].model_dump_json(),
         user_prompt=state["prompt"],
         template_constraints="\n".join(lines),
         image_slots=", ".join(template.image_slots),
     )
-    return {"system_prompt": system_prompt}
+    return {"generate_user_prompt": user_prompt}
 
 
 def generate_draft_node(state: GenerationState, config: RunnableConfig) -> dict:
@@ -147,7 +152,10 @@ def generate_draft_node(state: GenerationState, config: RunnableConfig) -> dict:
     # keeps this span nested under that one request's Langfuse trace.
     model = get_agent_model(GENERATION_MODEL_ENV, temperature=0.4).with_structured_output(ArticleSchema)
     draft = model.invoke(
-        [{"role": "user", "content": state["system_prompt"]}],
+        [
+            {"role": "system", "content": GENERATE_DRAFT_SYSTEM_PROMPT},
+            {"role": "user", "content": state["generate_user_prompt"]},
+        ],
         config=config,
     )
     return {"draft": draft, "repair_attempts": 0}
@@ -227,7 +235,7 @@ def repair_node(state: GenerationState, config: RunnableConfig) -> dict:
         if current_text is None:
             continue
 
-        prompt = REPAIR_FIELD_PROMPT.format(
+        user_prompt = REPAIR_FIELD_USER_PROMPT.format(
             field_id=field_id,
             actual_words=err["actual_words"],
             limit_kind=err["kind"],
@@ -236,7 +244,10 @@ def repair_node(state: GenerationState, config: RunnableConfig) -> dict:
             current_text=current_text,
         )
         result = model.invoke(
-            [{"role": "user", "content": prompt}],
+            [
+                {"role": "system", "content": REPAIR_FIELD_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
             config=config,
         )
         new_text = _flatten_content(result.content).strip()
