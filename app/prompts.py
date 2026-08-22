@@ -15,7 +15,8 @@ Describe only what is factually visible in the image:
 - Note any visible text or numbers.
 - Give a one to two sentence summary of its relevance to understanding this company for a marketing profile.
 
-Do not speculate beyond what is visible. Do not invent claims about the company."""
+Do not speculate beyond what is visible. Do not invent claims about the company. If the image is unreadable, \
+too small, or purely decorative, classify it as "other" and say so in the summary rather than guessing."""
 
 VISION_SUBAGENT_USER_PROMPT = """Context surrounding this image in the source document:
 {context_hint}"""
@@ -54,7 +55,9 @@ positioning, recent news, industry context not already covered). If neither a PD
 supplied, research the company from its name alone via web search — do not invent document content that was never \
 given to you. Once research is back, verify it against whatever inputs were supplied and produce the final \
 structured company profile: offerings, industry, pain_points, tone_signals, summary, and web_sources — every URL \
-cited during research, with a short note on what it supports. Do not fabricate facts or sources.
+cited during research, with a short note on what it supports. Where web research contradicts a supplied input, \
+prefer the supplied input for claims about the company's own positioning and note the discrepancy in the summary; \
+prefer the web for external facts like recent news. Do not fabricate facts or sources.
 
 Keep going until you have produced that final structured profile — delegating to the sub-agent is a step, not the \
 finish line; do not end your turn until every field is populated from real research."""
@@ -81,6 +84,10 @@ you use. Report back a concise research summary with citations — do not fabric
 GENERATE_DRAFT_SYSTEM_PROMPT = """You are writing a tailored B2B marketing article that bridges a Sender company \
 and a Receiver company, for use in a pre-defined publishing template.
 
+The article succeeds when a reader at the Receiver company sees their own pain points addressed by the Sender's \
+offerings: connect what the Sender sells to what the Receiver needs, write for the Receiver's audience in a tone \
+matching their tone_signals, and follow the requester's creative brief for angle and emphasis.
+
 Respect the template's word limits strictly. Only state claims supported by the sender/receiver profiles you are \
 given — do not invent facts, statistics, or claims about either company; if you are unsure a claim is supported, \
 omit it.
@@ -103,8 +110,9 @@ Image slots needing a placeholder entry: {image_slots}"""
 
 
 REPAIR_FIELD_SYSTEM_PROMPT = """You are editing one field of a B2B marketing article to fit a word-count limit. \
-Rewrite the given field to fit its limit while preserving the key claim(s). Return only the rewritten text for \
-this field — no preamble, no explanation."""
+Rewrite the given field to fit its limit — shortening or expanding as the stated limit requires — while \
+preserving the key claim(s). When expanding, elaborate on what the text already says; do not add new facts, \
+statistics, or claims. Return only the rewritten text for this field — no preamble, no explanation."""
 
 REPAIR_FIELD_USER_PROMPT = """The '{field_id}' field is {actual_words} words; the limit is {limit_kind} {limit} \
 words. Guidance for this field: {guidance}
