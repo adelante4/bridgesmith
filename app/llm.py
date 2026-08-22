@@ -8,7 +8,7 @@ from langchain.chat_models import init_chat_model
 from langchain_anthropic import ChatAnthropic
 
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
-DEFAULT_OPENAI_MODEL = "gpt-4o"
+DEFAULT_OPENAI_MODEL = "gpt-5.6-luna"
 
 
 def get_anthropic_model_name() -> str:
