@@ -1,8 +1,11 @@
-"""describe_image vision subagent — a separate, narrowly-scoped Claude call.
+"""describe_image vision subagent — a separate, narrowly-scoped multimodal call.
 
 Pure function: given an image + hint, get a description. No shared history with
 the ingestion agent, no caching/persistence logic here (that lives in the tool
 wrapper in graphs/ingestion_agent.py).
+
+Uses langchain-core's standard (provider-agnostic) image content block, so this
+works against whichever model VISION_MODEL_ENV resolves to.
 """
 
 import base64
@@ -13,7 +16,7 @@ import mimetypes
 from langchain_core.runnables import RunnableConfig
 from PIL import Image as PILImage
 
-from app.llm import get_chat_anthropic
+from app.llm import VISION_MODEL_ENV, get_agent_model
 from app.observability import new_trace_config
 from app.prompts import VISION_SUBAGENT_PROMPT
 from app.schemas import ImageDescription
@@ -51,14 +54,18 @@ def describe_image_subagent(
     b64_data = base64.b64encode(image_bytes).decode("utf-8")
 
     # Fresh model instance per call — no shared conversation history with the caller.
-    model = get_chat_anthropic().with_structured_output(ImageDescription)
+    model = get_agent_model(VISION_MODEL_ENV, temperature=0).with_structured_output(ImageDescription)
 
+    # Standard content blocks (langchain-core v1) — translated by each chat model
+    # integration to its own wire format, so this works across providers.
     message = {
         "role": "user",
         "content": [
             {
                 "type": "image",
-                "source": {"type": "base64", "media_type": media_type, "data": b64_data},
+                "source_type": "base64",
+                "data": b64_data,
+                "mime_type": media_type,
             },
             {"type": "text", "text": VISION_SUBAGENT_PROMPT.format(context_hint=context_hint)},
         ],

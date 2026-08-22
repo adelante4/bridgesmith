@@ -14,7 +14,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from sqlmodel import Session, select
 
-from app.llm import get_chat_anthropic
+from app.llm import INGESTION_AGENT_MODEL_ENV, get_agent_model
 from app.models import Image, ImageTag
 from app.observability import new_trace_config
 from app.pdf_extraction import ImageMeta
@@ -145,7 +145,7 @@ def run_ingestion_agent(
     config = config or new_trace_config()
     run_state = _IngestionRunState()
     tools = _build_tools(session, company_id, pdf_digest_id, image_map, run_state, config)
-    model = get_chat_anthropic()
+    model = get_agent_model(INGESTION_AGENT_MODEL_ENV)
     system_prompt = INGESTION_AGENT_SYSTEM_PROMPT.format(transcript=transcript)
 
     agent = create_react_agent(model, tools, prompt=system_prompt)
