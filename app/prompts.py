@@ -190,7 +190,11 @@ creative brief, not a stock list.
 For each perspective, write 2-4 concrete, searchable questions that perspective would need answered before \
 believing the article. Every question must target something the given profiles do NOT already answer — recent \
 news, specific numbers, named customers or case studies, current industry pressure. Skip any question whose \
-answer is already sitting in a profile."""
+answer is already sitting in a profile.
+
+Each question is later handed to a search agent on its own, with no profiles, no brief, and no other questions \
+for context — write every question so it stands alone: name the sender or receiver company explicitly (never \
+"the company", "they", or "it") and spell out any acronym or shorthand from the brief."""
 
 RESEARCH_PLAN_USER_PROMPT = """Sender ({sender_name}) profile:
 {sender_profile}
@@ -214,6 +218,10 @@ because the profiles do NOT answer them.
 Plan your work with the todo tool. Delegate one question (or a small cluster of related questions) at a time to \
 the fact-finder sub-agent; use web_search yourself for quick follow-ups. Search rather than relying on what you \
 already know — recent news and positioning go stale.
+
+The fact-finder sub-agent sees only the task text you give it — no profiles, no other questions, nothing else. \
+Delegate questions verbatim (they already name the company); never shorten a question to a bare pronoun or \
+"the company" when delegating.
 
 Budget: at most 6 total search calls across yourself and the sub-agent. Stop once the questions are answered \
 confidently, or once two searches in a row return nothing new — an honestly unanswered question is better than \

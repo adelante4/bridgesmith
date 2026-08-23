@@ -176,7 +176,11 @@ class ResearchPerspective(BaseModel):
         description="Who holds this perspective, e.g. 'budget decision-maker at the receiver', 'sender proof-point verifier'"
     )
     questions: list[str] = Field(
-        description="2-4 concrete, searchable questions this perspective needs answered that the profiles don't already answer"
+        description=(
+            "2-4 concrete, searchable questions this perspective needs answered that the profiles don't already "
+            "answer. Each question is handed to a search agent with no other context — self-contained: name the "
+            "sender or receiver company explicitly (never 'the company', 'they', or 'it')."
+        )
     )
 
 
