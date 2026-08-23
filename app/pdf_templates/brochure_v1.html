@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{% if google_font_url %}
+<link rel="stylesheet" href="{{ google_font_url }}">
+{% endif %}
+<style>
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: {{ font_stack }};
+    color: #1a1a1a;
+  }
+
+  .cover {
+    height: 100vh;
+    padding: 56px 48px;
+    background: linear-gradient(160deg, {{ primary_color }} 0%, {{ primary_color }} 60%, {{ accent_color }} 140%);
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  .cover .hero-image {
+    position: absolute;
+    top: 56px;
+    left: 48px;
+    right: 48px;
+    height: 40%;
+    object-fit: cover;
+    border-radius: 12px;
+  }
+
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 11px;
+    opacity: 0.75;
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-size: 40px;
+    line-height: 1.15;
+    margin: 0 0 16px 0;
+    font-weight: 700;
+  }
+
+  .subheadline {
+    font-size: 18px;
+    line-height: 1.5;
+    opacity: 0.92;
+    max-width: 34em;
+  }
+
+  .content {
+    padding: 48px;
+  }
+
+  .section {
+    margin-bottom: 36px;
+    page-break-inside: avoid;
+  }
+
+  .section img {
+    width: 100%;
+    max-height: 280px;
+    object-fit: cover;
+    border-radius: 10px;
+    margin-bottom: 16px;
+  }
+
+  .section p {
+    font-size: 14px;
+    line-height: 1.7;
+    color: #333333;
+  }
+
+  .pull-quote {
+    border-left: 4px solid {{ accent_color }};
+    padding: 12px 24px;
+    margin: 40px 0;
+    font-size: 20px;
+    font-style: italic;
+    color: {{ primary_color }};
+  }
+
+  .cta {
+    background: {{ primary_color }};
+    color: #ffffff;
+    border-radius: 10px;
+    padding: 28px 32px;
+    font-size: 16px;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .footer-accent {
+    height: 6px;
+    background: {{ accent_color }};
+  }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  {% if images.get('hero') %}
+  <img class="hero-image" src="{{ images['hero'] }}" alt="">
+  {% endif %}
+  <div class="eyebrow">Company Brochure</div>
+  <h1>{{ headline }}</h1>
+  <div class="subheadline">{{ subheadline }}</div>
+</div>
+
+<div class="content">
+  {% for section in sections %}
+  <div class="section">
+    {% set slot_map = {'body_value': 'section_1', 'body_proof': 'section_2'} %}
+    {% set slot = slot_map.get(section.id) %}
+    {% if slot and images.get(slot) %}
+    <img src="{{ images[slot] }}" alt="">
+    {% endif %}
+    <p>{{ section.text }}</p>
+  </div>
+  {% endfor %}
+
+  <div class="pull-quote">&ldquo;{{ pull_quote }}&rdquo;</div>
+
+  <div class="cta">{{ cta }}</div>
+</div>
+
+<div class="footer-accent"></div>
+
+</body>
+</html>
