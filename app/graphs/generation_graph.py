@@ -1,13 +1,14 @@
-"""Generation LangGraph: load_profiles -> research_brief -> (research_sender ||
-research_receiver) -> outline -> draft_sections -> polish -> critique ->
-(revise -> critique)? -> validate -> (repair -> validate)* -> finalize_article.
+"""Generation LangGraph: load_profiles -> plan_research -> research -> outline
+-> draft_sections -> polish -> critique -> (revise -> critique)? -> validate
+-> (repair -> validate)* -> finalize_article.
 
-Research nodes each wrap deepagents.create_deep_agent (same idiom as
-app/deep_research.py) so the writer gets facts researched *for this specific
-sender/receiver pairing* — not just the profiles captured once at ingestion
-time. Outline-then-per-unit drafting follows STORM: commit to which fact goes
-where before writing any prose, then write each template unit against only
-its assigned facts. See spec.md §3.2 and docs/adr/ for the redesign rationale.
+STORM, trimmed to its core: plan_research derives 2-3 perspectives of people
+who will judge THIS article (perspective-guided question asking) and the
+questions each needs answered beyond what the ingestion-time profiles already
+say; one research agent (deepagents.create_deep_agent, same idiom as
+app/deep_research.py) answers them with web search. Outline-then-per-unit
+drafting commits each fact to a section before any prose is written. See
+spec.md §3.2 and docs/adr/ for the redesign rationale.
 """
 
 import json
@@ -41,8 +42,8 @@ from app.prompts import (
     POLISH_SYSTEM_PROMPT,
     POLISH_USER_PROMPT,
     REPAIR_TURN_USER_PROMPT,
-    RESEARCH_BRIEF_SYSTEM_PROMPT,
-    RESEARCH_BRIEF_USER_PROMPT,
+    RESEARCH_PLAN_SYSTEM_PROMPT,
+    RESEARCH_PLAN_USER_PROMPT,
     REVISE_TURN_USER_PROMPT,
     SECTION_WRITER_SYSTEM_PROMPT,
     SECTION_WRITER_USER_PROMPT,
@@ -58,7 +59,7 @@ from app.schemas import (
     GenerateSection,
     HeadlineSubheadlineDraft,
     QuoteCtaDraft,
-    ResearchBriefSchema,
+    ResearchPlanSchema,
     SectionTextDraft,
     TemplateConfig,
     WebSource,
@@ -68,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 MAX_REPAIR_ATTEMPTS = 2
 MAX_REVISE_ATTEMPTS = 1
-MAX_RESEARCH_SEARCHES = 5  # enforced via prompt budget, not code — see GENERATION_RESEARCH_SYSTEM_PROMPT
+MAX_RESEARCH_SEARCHES = 6  # enforced via prompt budget, not code — see GENERATION_RESEARCH_SYSTEM_PROMPT
 
 
 class CompanyNotFoundError(Exception):
@@ -93,9 +94,8 @@ class GenerationState(TypedDict, total=False):
     receiver_pdf_digest_id: int
     asset_catalog: dict[str, int]  # alias (e.g. "A2") -> Image.id
     sender_assets_block: str
-    research_brief: ResearchBriefSchema
-    sender_research: CompressedResearchSchema
-    receiver_research: CompressedResearchSchema
+    research_plan: ResearchPlanSchema
+    research: CompressedResearchSchema
     outline: ArticleOutlineSchema
     section_drafts: dict[str, str]  # template section id -> drafted text
     headline_draft: str
@@ -202,38 +202,41 @@ def make_load_profiles_node(session: Session):
 
 
 # ---------------------------------------------------------------------------
-# research_brief
+# plan_research — STORM perspective-guided question asking: derive who will
+# judge this article, and what each of them would need answered first.
 # ---------------------------------------------------------------------------
 
 
-@observe(name="research_brief", capture_input=False, capture_output=False)
-def research_brief_node(state: GenerationState) -> dict:
-    model = get_agent_model(GENERATION_MODEL_ENV).with_structured_output(ResearchBriefSchema)
-    prompt = RESEARCH_BRIEF_USER_PROMPT.format(
+@observe(name="plan_research", capture_input=False, capture_output=False)
+def plan_research_node(state: GenerationState) -> dict:
+    model = get_agent_model(GENERATION_MODEL_ENV).with_structured_output(ResearchPlanSchema)
+    prompt = RESEARCH_PLAN_USER_PROMPT.format(
+        sender_name=state["sender_name"],
+        receiver_name=state["receiver_name"],
         sender_profile=state["sender_profile"].model_dump_json(exclude={"web_sources"}),
         receiver_profile=state["receiver_profile"].model_dump_json(exclude={"web_sources"}),
         user_prompt=state["prompt"],
     )
-    brief = model.invoke(
+    plan = model.invoke(
         [
-            {"role": "system", "content": RESEARCH_BRIEF_SYSTEM_PROMPT},
+            {"role": "system", "content": RESEARCH_PLAN_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
         config=new_trace_config(),
     )
-    return {"research_brief": brief}
+    return {"research_plan": plan}
 
 
 # ---------------------------------------------------------------------------
-# research_sender / research_receiver — parallel, isolated per-company agents
+# research — one deep agent answers the perspective-guided questions
 # ---------------------------------------------------------------------------
 
 
-def _build_company_researcher(role: str):
+def _build_researcher():
     web_search_tool = get_web_search_tool(GENERATION_RESEARCH_MODEL_ENV)
     fact_finder_subagent = {
         "name": "fact-finder",
-        "description": "Delegate a focused web search on one or a few related research dimensions to this sub-agent.",
+        "description": "Delegate a focused web search on one or a few related research questions to this sub-agent.",
         "system_prompt": GENERATION_FACT_FINDER_SUBAGENT_PROMPT,
         "tools": [web_search_tool],
     }
@@ -247,38 +250,30 @@ def _build_company_researcher(role: str):
     )
 
 
-def _run_company_research(
-    role: str, company_name: str, profile: CompanyProfileSchema, dimensions: list[str]
-) -> CompressedResearchSchema:
-    agent = _build_company_researcher(role)
+def _questions_block(plan: ResearchPlanSchema) -> str:
+    lines = []
+    for perspective in plan.perspectives:
+        lines.append(f"{perspective.name}:")
+        lines.extend(f"- {q}" for q in perspective.questions)
+    return "\n".join(lines)
+
+
+@observe(name="research", capture_input=False, capture_output=False)
+def research_node(state: GenerationState) -> dict:
+    agent = _build_researcher()
     prompt = GENERATION_RESEARCH_USER_PROMPT.format(
-        role=role,
-        company_name=company_name,
-        profile=profile.model_dump_json(exclude={"web_sources"}),
-        dimensions="\n".join(f"- {d}" for d in dimensions),
+        sender_name=state["sender_name"],
+        receiver_name=state["receiver_name"],
+        sender_profile=state["sender_profile"].model_dump_json(exclude={"web_sources"}),
+        receiver_profile=state["receiver_profile"].model_dump_json(exclude={"web_sources"}),
+        questions=_questions_block(state["research_plan"]),
     )
     result = agent.invoke({"messages": [{"role": "user", "content": prompt}]}, config=new_trace_config())
     research = result.get("structured_response")
     if research is None:
-        logger.error("Generation research agent (%s) did not return a structured_response", role)
-        raise RuntimeError(f"generation research agent ({role}) did not return structured research")
-    return research
-
-
-@observe(name="research_sender", capture_input=False, capture_output=False)
-def research_sender_node(state: GenerationState) -> dict:
-    research = _run_company_research(
-        "sender", state["sender_name"], state["sender_profile"], state["research_brief"].sender_dimensions
-    )
-    return {"sender_research": research}
-
-
-@observe(name="research_receiver", capture_input=False, capture_output=False)
-def research_receiver_node(state: GenerationState) -> dict:
-    research = _run_company_research(
-        "receiver", state["receiver_name"], state["receiver_profile"], state["research_brief"].receiver_dimensions
-    )
-    return {"receiver_research": research}
+        logger.error("Generation research agent did not return a structured_response")
+        raise RuntimeError("generation research agent did not return structured research")
+    return {"research": research}
 
 
 def _facts_block(research: CompressedResearchSchema) -> str:
@@ -312,8 +307,7 @@ def outline_node(state: GenerationState) -> dict:
     prompt = OUTLINE_USER_PROMPT.format(
         sender_profile=state["sender_profile"].model_dump_json(exclude={"web_sources"}),
         receiver_profile=state["receiver_profile"].model_dump_json(exclude={"web_sources"}),
-        sender_research=_facts_block(state["sender_research"]),
-        receiver_research=_facts_block(state["receiver_research"]),
+        research=_facts_block(state["research"]),
         user_prompt=state["prompt"],
         template_constraints="\n".join(lines),
     )
@@ -456,7 +450,7 @@ def polish_node(state: GenerationState) -> dict:
     lines.append(f"cta: max {fields.cta.max_words} words")
 
     sections_block = "\n".join(f"[{sid}] {text}" for sid, text in state["section_drafts"].items())
-    all_facts = _facts_block(state["sender_research"]) + "\n" + _facts_block(state["receiver_research"])
+    all_facts = _facts_block(state["research"])
 
     user_prompt = POLISH_USER_PROMPT.format(
         headline=state["headline_draft"],
@@ -493,8 +487,7 @@ def critique_node(state: GenerationState) -> dict:
     model = get_agent_model(GENERATION_MODEL_ENV).with_structured_output(CritiqueSchema)
     prompt = CRITIQUE_USER_PROMPT.format(
         article=article_text,
-        sender_research=_facts_block(state["sender_research"]),
-        receiver_research=_facts_block(state["receiver_research"]),
+        research=_facts_block(state["research"]),
     )
     critique = model.invoke(
         [
@@ -716,9 +709,8 @@ def build_generation_graph(session: Session):
 
     graph = StateGraph(GenerationState)
     graph.add_node("load_profiles", make_load_profiles_node(session))
-    graph.add_node("research_brief", research_brief_node)
-    graph.add_node("research_sender", research_sender_node)
-    graph.add_node("research_receiver", research_receiver_node)
+    graph.add_node("plan_research", plan_research_node)
+    graph.add_node("research", research_node)
     graph.add_node("outline", outline_node)
     graph.add_node("draft_sections", draft_sections_node)
     graph.add_node("polish", polish_node)
@@ -729,13 +721,9 @@ def build_generation_graph(session: Session):
     graph.add_node("finalize_article", make_finalize_article_node(session))
 
     graph.set_entry_point("load_profiles")
-    graph.add_edge("load_profiles", "research_brief")
-    # Fan out: both company researchers run in parallel off research_brief,
-    # and outline waits for both (LangGraph joins on multiple incoming edges).
-    graph.add_edge("research_brief", "research_sender")
-    graph.add_edge("research_brief", "research_receiver")
-    graph.add_edge("research_sender", "outline")
-    graph.add_edge("research_receiver", "outline")
+    graph.add_edge("load_profiles", "plan_research")
+    graph.add_edge("plan_research", "research")
+    graph.add_edge("research", "outline")
     graph.add_edge("outline", "draft_sections")
     graph.add_edge("draft_sections", "polish")
     graph.add_edge("polish", "critique")
