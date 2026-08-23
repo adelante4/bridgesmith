@@ -1,7 +1,10 @@
 """SQLModel ORM models — see spec.md §4 for the original data model, and
 docs/adr/0001-role-independent-company-versioned-profiles.md for how it has
-since evolved: Company is role-independent identity only; PdfDigest and
-CompanyProfile are versioned per ingestion run, one of each per upload."""
+since evolved: Company is role-independent identity only. Context accumulates
+as three independent, append-only per-company logs — PdfDigest, Description,
+ResearchRun — each one row per add, nothing ever overwritten. There is no
+synthesized "profile" row: /generate reads all three logs directly at
+generation time (see docs/adr/0005-decouple-context-from-research.md)."""
 
 import enum
 from datetime import datetime, timezone
@@ -32,7 +35,13 @@ class Company(SQLModel, table=True):
 
 class PdfDigest(SQLModel, table=True):
     """One row per ingestion run (one per PDF upload) — the per-run artifact
-    record: raw transcript, tables, and the ingestion agent's merged summary."""
+    record: raw transcript, tables, and the ingestion agent's merged summary.
+    Also carries the per-PDF style signals gathered at ingestion time:
+    tone_signals from the text-reading ingestion agent, and
+    design_notes/brand colors from a vision pass over the PDF's first pages
+    (font_family is cross-checked deterministically from embedded PDF font
+    metadata). /generate's style selector always reads the company's newest
+    PdfDigest row for these — no separate profile/style table."""
 
     id: int | None = Field(default=None, primary_key=True)
     company_id: str = Field(foreign_key="company.id")
@@ -41,8 +50,13 @@ class PdfDigest(SQLModel, table=True):
     digest_text: str = Field(default="")
     key_facts: str = Field(default="[]", description="JSON list of short factual bullets")
     document_type: str = Field(default="")
+    tone_signals: str = Field(default="", description="Writing/voice tone observed in the document's own text")
     images_reviewed: int = Field(default=0)
     images_cap_hit: bool = Field(default=False)
+    design_notes: str = Field(default="", description="Visual style notes from the page-1-2 vision pass")
+    brand_primary_color: str | None = Field(default=None)
+    brand_accent_color: str | None = Field(default=None)
+    brand_font_family: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -62,30 +76,29 @@ class Image(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
-class CompanyProfile(SQLModel, table=True):
-    """Versioned: one row per ingestion run, never updated in place. /generate
-    always reads the latest version for a company (highest id)."""
+class Description(SQLModel, table=True):
+    """One row per free-text "add context" submission with no PDF attached.
+    Append-only, same pattern as PdfDigest — every description a company has
+    ever been given is kept and folded into the context blob at generate time."""
 
     id: int | None = Field(default=None, primary_key=True)
     company_id: str = Field(foreign_key="company.id")
-    pdf_digest_id: int | None = Field(
-        default=None,
-        foreign_key="pdfdigest.id",
-        description="The PDF ingestion run this profile version was produced from, if any — None when this "
-        "version came from a name/description-only research run with no PDF uploaded",
-    )
-    description: str | None = Field(
-        default=None, description="User-provided free-text company description supplied for this run, if any"
-    )
+    text: str
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class ResearchRun(SQLModel, table=True):
+    """One row per deep-research run, triggered independently of PDF/description
+    uploads (POST /context/{company_id}/research). All runs are kept; /generate
+    always reads only the newest one for a company."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: str = Field(foreign_key="company.id")
     offerings: str
     industry: str
     pain_points: str = Field(default="[]", description="JSON list")
-    tone_signals: str
     summary: str
     web_sources: str = Field(default="[]", description="JSON list of {url, note}")
-    brand_primary_color: str | None = Field(default=None)
-    brand_accent_color: str | None = Field(default=None)
-    brand_font_family: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -93,8 +106,12 @@ class GeneratedArticle(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     sender_id: str = Field(foreign_key="company.id")
     receiver_id: str = Field(foreign_key="company.id")
-    sender_profile_id: int = Field(foreign_key="companyprofile.id", description="Exact profile version used")
-    receiver_profile_id: int = Field(foreign_key="companyprofile.id", description="Exact profile version used")
+    sender_pdf_digest_id: int | None = Field(
+        default=None, foreign_key="pdfdigest.id", description="Sender's newest PdfDigest at generation time, if any"
+    )
+    receiver_pdf_digest_id: int | None = Field(
+        default=None, foreign_key="pdfdigest.id", description="Receiver's newest PdfDigest at generation time, if any"
+    )
     prompt: str
     template_id: str
     result_json: str

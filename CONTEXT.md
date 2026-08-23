@@ -13,15 +13,23 @@ Roles a Company plays for the duration of a single `/generate` request, not prop
 _Avoid_: treating these as company attributes, "the sender company" as a fixed identity.
 
 **PdfDigest**:
-The record of one ingestion run: the annotated transcript (text + `[[IMAGE:id]]` markers), extracted tables, and the ingestion agent's merged text+image summary (`digest_text`, `key_facts`, `document_type`) for one PDF upload. A Company accumulates one `PdfDigest` per upload — this is where per-run artifacts live, not on Company.
-_Avoid_: Transcript (too narrow — a digest includes tables and image summaries, not just text), Summary (ambiguous with CompanyProfile.summary).
+The record of one PDF upload: the annotated transcript (text + `[[IMAGE:id]]` markers), extracted tables, the ingestion agent's merged text+image summary (`digest_text`, `key_facts`, `document_type`), its `tone_signals` (writing/voice tone read from the document's own text), and its `design_notes`/`brand_primary_color`/`brand_accent_color`/`brand_font_family` (visual style, from a vision pass over the PDF's first pages plus deterministic embedded-font detection). A Company accumulates one `PdfDigest` per upload, append-only — this is where per-upload artifacts *and* style signals live, not on Company. `/generate`'s style selector deterministically reads a company's *newest* `PdfDigest`.
+_Avoid_: Transcript (too narrow — a digest includes tables and image summaries, not just text), Profile (a digest is one company's-own-document artifact; it never includes web research).
 
-**CompanyProfile**:
-A versioned, web-search-augmented research profile for a company, produced once per ingestion run from that run's `PdfDigest`. Every upload creates a new `CompanyProfile` version; `/generate` always reads the latest version for a company. Never mutated in place.
-_Avoid_: "the" profile (there can be several, ordered by recency), Digest (a profile is Digest + web research, not the same thing).
+**Description**:
+One free-text "add context" submission for a company with no PDF attached. Append-only, same pattern as `PdfDigest` — every description ever added for a company is kept, not just the latest.
+_Avoid_: Profile, Summary.
+
+**ResearchRun**:
+One deep-research (web-search-augmented) run for a company, triggered independently of any upload via `POST /context/{company_id}/research` — never fired automatically by adding a PdfDigest or Description. Every run is kept; `/generate` reads only the newest one for a company. See `docs/adr/0005-decouple-context-from-research.md`.
+_Avoid_: CompanyProfile (retired — see below), "the" research (there can be several, ordered by recency).
+
+**Context blob**:
+The plain markdown concatenation of everything on file for a company — every `PdfDigest.digest_text`, every `Description.text`, and the newest `ResearchRun`'s findings — built fresh at generation time (`app/graphs/generation_graph.py::_context_blob`, no LLM call). What the old, now-retired `CompanyProfile` synthesized once per upload; now assembled from *all* accumulated context every time, not just the most recent upload's artifact.
+_Avoid_: Profile, Summary (a specific `ResearchRun.summary` field, not the blob).
 
 **Image**:
-An extracted image asset, scoped to the specific `PdfDigest` run that produced it — not a company-wide flat pool. `/generate`'s asset matching only considers images from a company's *latest* run, consistent with always using the latest `CompanyProfile`.
+An extracted image asset, scoped to the specific `PdfDigest` run that produced it — not a company-wide flat pool. `/generate`'s asset matching only considers images from a company's *newest* `PdfDigest`.
 _Avoid_: Asset (used loosely elsewhere for "extracted image or stock query hint" generically — Image specifically means a row with a `file_path`).
 
 **Template**:
@@ -29,5 +37,5 @@ A fixed publishing-layout contract (word limits, image slots, theme colors) supp
 _Avoid_: Schema (that's the Pydantic/ORM sense elsewhere in the codebase), Layout.
 
 **Article** / **GeneratedArticle**:
-The generated JSON output for one sender/receiver/prompt/template combination. Records exactly which `CompanyProfile` version (sender + receiver) it was grounded in, so a past article stays traceable even after either company's profile has since changed.
-_Avoid_: Draft (that's the in-flight `ArticleSchema` before validation/repair; an Article/GeneratedArticle is the final persisted result).
+The generated JSON output for one sender/receiver/prompt/template combination. Records which `PdfDigest` (sender + receiver, nullable — a company can be generated for with zero PDF uploads) was the company's newest at generation time, so a past article stays traceable even after either company's context has since changed.
+_Avoid_: Draft (that's the in-flight `ArticleSchema` before validation/repair; an Article/GeneratedArticle is the final persisted result), CompanyProfile version (retired terminology).

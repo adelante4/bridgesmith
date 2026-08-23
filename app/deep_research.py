@@ -29,7 +29,7 @@ from app.prompts import (
     NO_DESCRIPTION_PLACEHOLDER,
     NO_PDF_DIGEST_PLACEHOLDER,
 )
-from app.schemas import CompanyProfileSchema, PdfDigestSchema
+from app.schemas import PdfDigestSchema, ResearchResultSchema
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def _build_agent():
         system_prompt=DEEP_RESEARCH_SYSTEM_PROMPT,
         subagents=[company_research_subagent],
         middleware=[TodoListMiddleware()],
-        response_format=CompanyProfileSchema,
+        response_format=ResearchResultSchema,
     )
 
 
@@ -57,7 +57,7 @@ def research_company_profile(
     digest: PdfDigestSchema | None = None,
     description: str | None = None,
     config: RunnableConfig | None = None,
-) -> CompanyProfileSchema:
+) -> ResearchResultSchema:
     """`config` optionally overrides the callback handler; when omitted, a fresh
     one is built here and nests under whatever Langfuse span is current (the
     caller's @observe span) via OTEL context."""

@@ -97,3 +97,38 @@ def extract_pdf_structure(pdf_bytes: bytes, company_id: str, assets_dir: str) ->
         page_count=doc_page_count,
         tables_json=tables_json,
     )
+
+
+def render_first_pages(pdf_bytes: bytes, max_pages: int = 2) -> list[bytes]:
+    """Rasterizes the document's first `max_pages` pages to PNG bytes, for the
+    brand vision pass (app/vision.py). Deterministic, no LLM involved here."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        pages = []
+        for page_index in range(min(max_pages, len(doc))):
+            pixmap = doc[page_index].get_pixmap()
+            pages.append(pixmap.tobytes("png"))
+        return pages
+    finally:
+        doc.close()
+
+
+def detect_embedded_font(pdf_bytes: bytes, max_pages: int = 2) -> str | None:
+    """Deterministic font-family detection from the PDF's own embedded font
+    metadata (no vision/LLM guessing) — the most frequently used font's base
+    name (subset prefix like 'ABCDEF+' stripped) across the first pages."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        counts: dict[str, int] = {}
+        for page_index in range(min(max_pages, len(doc))):
+            for font in doc[page_index].get_fonts():
+                raw_name = font[3]
+                name = raw_name.split("+", 1)[1] if "+" in raw_name else raw_name
+                name = name.split("-")[0].split(",")[0].strip()
+                if name:
+                    counts[name] = counts.get(name, 0) + 1
+        if not counts:
+            return None
+        return max(counts, key=counts.get)
+    finally:
+        doc.close()
