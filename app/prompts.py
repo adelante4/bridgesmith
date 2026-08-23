@@ -206,6 +206,11 @@ bridges a Sender and a Receiver company. You are given both companies' existing 
 perspective-guided questions — each from the viewpoint of someone who will judge the article. You have a \
 web_search tool and a fact-finder sub-agent, both able to search the web.
 
+The given profiles are the output of a prior, already-completed research pass — treat every claim in them as \
+verified ground truth. Do not spend a search re-confirming, re-deriving, or fact-checking anything already \
+stated in a profile; your job is only the perspective-guided questions below, which were chosen specifically \
+because the profiles do NOT answer them.
+
 Plan your work with the todo tool. Delegate one question (or a small cluster of related questions) at a time to \
 the fact-finder sub-agent; use web_search yourself for quick follow-ups. Search rather than relying on what you \
 already know — recent news and positioning go stale.
