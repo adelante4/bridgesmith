@@ -73,6 +73,17 @@ class Image(SQLModel, table=True):
     page_number: int
     description: str = Field(default="")
     tag: ImageTag = Field(default=ImageTag.generic)
+    is_own_brand: bool = Field(
+        default=False,
+        description=(
+            "True only when this mark belongs to the company that uploaded the document. "
+            "A company deck is full of OTHER companies' logos — customers, partners, cloud "
+            "providers — and `tag` cannot tell them apart: Acme's own mark and its customer "
+            "Bolt's are both tag=logo. Rendering a customer's logo where the sender's belongs "
+            "misrepresents both, so the brochure only ever uses a logo with this set. Defaults "
+            "to False: an unclassified mark is not usable."
+        ),
+    )
     created_at: datetime = Field(default_factory=_utcnow)
 
 

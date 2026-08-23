@@ -1,5 +1,6 @@
 {
   "template_id": "brochure_v1",
+  "html_template": "brochure_v1.html",
   "fields": {
     "headline": {"max_words": 12},
     "subheadline": {"max_words": 20},

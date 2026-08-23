@@ -46,6 +46,7 @@ from app.models import Company, Description
 from app.models import Image
 from app.models import PdfDigest as PdfDigestRow
 from app.models import ResearchRun as ResearchRunRow
+from app import richtext
 from app.observability import new_trace_config
 from app.prompts import (
     CRITIQUE_SYSTEM_PROMPT,
@@ -126,6 +127,7 @@ class GenerationState(TypedDict, total=False):
     research: CompressedResearchSchema
     outline: ArticleOutlineSchema
     section_drafts: dict[str, str]  # template section id -> drafted text
+    section_headings: dict[str, str]  # template section id -> drafted heading
     headline_draft: str
     subheadline_draft: str
     pull_quote_draft: str
@@ -312,25 +314,32 @@ def _load_company_context(session: Session, company_id: str):
     }
 
 
-HERO_SLOT = "hero"
-
-# Which image slots each asset tag may fill. A brand mark reads fine as a small
-# cover mark; it does not read as the photograph a large content slot expects.
-# 'generic' covers decorative shapes and arrows ("a decorative graphic showing
-# two opposing directional arrows") — never a content image anywhere.
-_TAG_ELIGIBILITY = {
-    "logo": {HERO_SLOT},
-    "product_image": None,  # None = every slot
-    "chart": None,
-    "generic": set(),
-}
+# Slots that stand for "this is the sender". Only a logo the ingestion vision
+# pass confirmed belongs to the document owner may fill one.
+_IDENTITY_SLOTS = {"hero", "masthead"}
 
 
 def _eligible_slots(image: Image, template_slots: list[str]) -> list[str]:
-    allowed = _TAG_ELIGIBILITY.get(image.tag.value, set())
-    if allowed is None:
-        return list(template_slots)
-    return [s for s in template_slots if s in allowed]
+    """Which slots this asset may fill. Two separate risks, so two rules.
+
+    Identity slots carry the sender's own mark. A company deck is full of other
+    companies' logos — Acme's carries its customers Bolt and Accolade — and
+    `tag` cannot tell them apart, since both are tag=logo. So an identity slot
+    requires `is_own_brand`, which the vision pass now sets by being told whose
+    document it is reading. Rows ingested before that classification existed
+    default to False and are never used, which fails closed.
+
+    Content slots want a mark, not a photograph and not somebody's wordmark, so
+    logos are excluded there regardless of who owns them."""
+    tag = image.tag.value
+    slots = []
+    for slot in template_slots:
+        if slot in _IDENTITY_SLOTS:
+            if tag == "logo" and image.is_own_brand:
+                slots.append(slot)
+        elif tag != "logo":
+            slots.append(slot)
+    return slots
 
 
 def make_load_profiles_node(session: Session):
@@ -538,9 +547,22 @@ def outline_node(state: GenerationState) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _write_unit(unit_label: str, word_limit: int, guidance: str, angle: str, fact_refs: list[str], state: GenerationState) -> str:
+def _write_unit(
+    unit_label: str,
+    word_limit: int,
+    guidance: str,
+    angle: str,
+    fact_refs: list[str],
+    state: GenerationState,
+    max_heading_words: int | None = None,
+) -> SectionTextDraft:
     schema = SectionTextDraft
     model = get_agent_model(GENERATION_MODEL_ENV, temperature=0.4).with_structured_output(schema)
+    if max_heading_words:
+        guidance = (
+            f"{guidance}\n\nAlso write a heading for this section: max {max_heading_words} words, "
+            f"naming what is specifically at stake here rather than a generic label."
+        )
     prompt = SECTION_WRITER_USER_PROMPT.format(
         unit_label=unit_label,
         word_limit=word_limit,
@@ -564,13 +586,17 @@ def _write_unit(unit_label: str, word_limit: int, guidance: str, angle: str, fac
         ],
         config=new_trace_config(),
     )
-    return result.text
+    return result
 
 
 def _body_text(fields, section_drafts: dict[str, str]) -> str:
-    """The drafted body as the headline/quote/CTA writers see it."""
+    """The drafted body as the headline/quote/CTA writers see it. Markup is
+    stripped: those writers are reading for argument, and emphasis markers are
+    a rendering concern that would only invite them to copy the syntax."""
     return "\n\n".join(
-        f"[{c.id}] {section_drafts[c.id]}" for c in fields.sections if c.id in section_drafts
+        f"[{c.id}] {richtext.strip(section_drafts[c.id])}"
+        for c in fields.sections
+        if c.id in section_drafts
     )
 
 
@@ -589,16 +615,27 @@ def draft_sections_node(state: GenerationState) -> dict:
 
     outline_by_id = {s.id: s for s in outline.sections}
     section_drafts: dict[str, str] = {}
+    section_headings: dict[str, str] = {}
     for constraint in fields.sections:
         plan = outline_by_id.get(constraint.id)
-        section_drafts[constraint.id] = _write_unit(
+        drafted = _write_unit(
             unit_label=f"section '{constraint.id}'",
             word_limit=constraint.max_words,
             guidance=constraint.guidance,
             angle=plan.angle if plan else "(no outline entry — write to the section guidance)",
             fact_refs=plan.fact_refs if plan else [],
             state=state,
+            max_heading_words=constraint.max_heading_words,
         )
+        section_drafts[constraint.id] = drafted.text
+        if constraint.max_heading_words:
+            # A heading is editorial content, so the contract's string is only a
+            # safety net for when generation produced nothing usable.
+            section_headings[constraint.id] = (
+                _word_truncate(drafted.heading, constraint.max_heading_words)
+                if drafted.heading
+                else constraint.heading_fallback
+            )
 
     body = _body_text(fields, section_drafts)
 
@@ -640,6 +677,7 @@ def draft_sections_node(state: GenerationState) -> dict:
         "headline_draft": headline_subheadline.headline,
         "subheadline_draft": headline_subheadline.subheadline,
         "section_drafts": section_drafts,
+        "section_headings": section_headings,
         "pull_quote_draft": quote_cta.pull_quote,
         "cta_draft": quote_cta.cta,
     }
@@ -789,7 +827,9 @@ def validate_node(state: GenerationState) -> dict:
     errors: list[dict] = []
 
     def check(field_id: str, text: str, max_words: int, min_words: int | None = None, guidance: str = ""):
-        wc = _word_count(text)
+        # Word limits are a promise about what a reader sees, so emphasis
+        # markers must not count toward them.
+        wc = _word_count(richtext.strip(text))
         if wc > max_words:
             errors.append(
                 {"field_id": field_id, "actual_words": wc, "limit": max_words, "kind": "max", "guidance": guidance}
@@ -817,17 +857,22 @@ def validate_node(state: GenerationState) -> dict:
             continue
         check(constraint.id, section.text, constraint.max_words, constraint.min_words, constraint.guidance)
 
-        if _concrete_anchors(section.text) == 0:
+        # Every content gate reads the prose a reader sees, never the markup:
+        # the anchor regex would otherwise match around asterisks, and the
+        # filler/hedge word sets would miss a marked-up word entirely.
+        plain = richtext.strip(section.text)
+
+        if _concrete_anchors(plain) == 0:
             errors.append(
                 {
                     "field_id": constraint.id,
-                    "actual_words": _word_count(section.text),
+                    "actual_words": _word_count(plain),
                     "limit": constraint.max_words,
                     "kind": "no_anchor",
                     "guidance": constraint.guidance,
                 }
             )
-        filler = _filler_hits(section.text)
+        filler = _filler_hits(plain)
         if filler:
             errors.append(
                 {
@@ -839,7 +884,7 @@ def validate_node(state: GenerationState) -> dict:
                     "words": filler,
                 }
             )
-        hedges = _hedge_hits(section.text)
+        hedges = _hedge_hits(plain)
         if hedges:
             errors.append(
                 {
@@ -988,8 +1033,9 @@ def make_finalize_article_node(session: Session):
             final_sections.append(
                 GenerateSection(
                     id=constraint.id,
+                    heading=state.get("section_headings", {}).get(constraint.id, ""),
                     text=text,
-                    word_count=_word_count(text),
+                    word_count=_word_count(richtext.strip(text)),
                     max_words=constraint.max_words,
                     truncated=truncated,
                 )

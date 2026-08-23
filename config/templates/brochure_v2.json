@@ -1,0 +1,38 @@
+{
+  "template_id": "brochure_v2",
+  "html_template": "brochure_v2.html",
+  "fields": {
+    "headline": {"max_words": 12},
+    "subheadline": {"max_words": 28},
+    "sections": [
+      {
+        "id": "body_intro",
+        "min_words": 110,
+        "max_words": 150,
+        "max_heading_words": 5,
+        "heading_fallback": "The opportunity",
+        "guidance": "Open on the receiver's situation and the pressure it creates, then name what the sender does about it. Lead with a dated event or a number from the research, not with a general observation."
+      },
+      {
+        "id": "body_value",
+        "min_words": 140,
+        "max_words": 180,
+        "max_heading_words": 5,
+        "heading_fallback": "How it works",
+        "guidance": "The concrete offer: what the sender would actually build or do, named specifically, and how it fits the receiver's existing systems and constraints."
+      },
+      {
+        "id": "body_proof",
+        "min_words": 110,
+        "max_words": 150,
+        "max_heading_words": 5,
+        "heading_fallback": "Track record",
+        "guidance": "Evidence the sender can do it. Name the customer, state the measured result, and say which part of it transfers to the receiver's situation."
+      }
+    ],
+    "pull_quote": {"max_words": 25},
+    "cta": {"max_words": 15}
+  },
+  "image_slots": ["masthead", "mark_1", "mark_2", "mark_3"],
+  "theme": {"primary_color": "#101828", "accent_color": "#2563EB", "font_family": "Inter"}
+}

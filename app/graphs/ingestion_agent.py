@@ -15,7 +15,7 @@ from langgraph.prebuilt import create_react_agent
 from sqlmodel import Session, select
 
 from app.llm import INGESTION_AGENT_MODEL_ENV, get_agent_model
-from app.models import Image, ImageTag
+from app.models import Company, Image, ImageTag
 from app.observability import new_trace_config
 from app.pdf_extraction import ImageMeta
 from app.prompts import INGESTION_AGENT_SYSTEM_PROMPT, INGESTION_AGENT_USER_PROMPT
@@ -61,6 +61,12 @@ def _build_tools(
     # other API misuse). Serialize all session access per run.
     session_lock = threading.Lock()
 
+    # The vision subagent has to know whose document this is before it can say
+    # whether a mark is the owner's own or a customer's. Resolved once here
+    # rather than threaded through the graph as another parameter.
+    owner = session.get(Company, company_id)
+    company_name = (owner.name if owner else None) or company_id
+
     @tool
     def describe_image(image_id: str, context_hint: str) -> str:
         """Describe an image from the document. Call for images materially relevant
@@ -91,7 +97,9 @@ def _build_tools(
 
         # Same config as the outer agent.invoke — nests this vision sub-call as a
         # child span of the ingestion agent's trace instead of a disconnected root.
-        description = describe_image_subagent(meta.file_path, context_hint, config=config)
+        description = describe_image_subagent(
+            meta.file_path, context_hint, company_name=company_name, config=config
+        )
 
         tag = _IMAGE_TYPE_TO_TAG.get(description.image_type, ImageTag.generic)
         stored_description = description.summary
@@ -108,6 +116,7 @@ def _build_tools(
                 page_number=meta.page_number,
                 description=stored_description,
                 tag=tag,
+                is_own_brand=description.is_own_brand,
             )
             session.add(image_row)
             session.commit()

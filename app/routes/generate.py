@@ -16,7 +16,10 @@ from app.templates import TemplateNotFoundError, load_template
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PDF_ENABLED_TEMPLATE_IDS = {"brochure_v1"}
+# Which templates render a PDF is now a property of the template itself (its
+# `html_template` field), not a set maintained here — otherwise "adding a
+# template is a config change" (spec.md §6) stops being true the moment a new
+# template needs rendering.
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -47,7 +50,7 @@ def generate_article(request: GenerateRequest, session: Session = Depends(get_se
         )
         raise HTTPException(502, f"LLM generation failed: {e}") from e
 
-    pdf_supported = template.template_id in PDF_ENABLED_TEMPLATE_IDS
+    pdf_supported = template.html_template is not None
     theme = (
         resolve_theme(template.theme, final_state["sender_style"].brand) if pdf_supported else template.theme
     )
@@ -80,7 +83,15 @@ def generate_article(request: GenerateRequest, session: Session = Depends(get_se
 
     if pdf_supported:
         try:
-            pdf_path = render_brochure_pdf(response, theme, session, request.sender_id, article.id)
+            pdf_path = render_brochure_pdf(
+                response,
+                theme,
+                session,
+                request.sender_id,
+                article.id,
+                template=template,
+                sender_name=final_state["sender_name"],
+            )
         except Exception:
             # PDF rendering is a bonus artifact on top of the JSON contract
             # (the actual deliverable, per spec.md) — never let a render

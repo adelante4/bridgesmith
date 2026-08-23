@@ -13,8 +13,11 @@ BRACES = 'text with {braces} and {"json": true}'
 
 
 def test_vision_user_prompt_formats():
-    out = prompts.VISION_SUBAGENT_USER_PROMPT.format(context_hint=BRACES)
+    out = prompts.VISION_SUBAGENT_USER_PROMPT.format(context_hint=BRACES, company_name="Acme")
     assert BRACES in out
+    # The subagent cannot judge whether a mark is the document owner's own
+    # without being told whose document it is.
+    assert "Acme" in out
 
 
 def test_ingestion_user_prompt_formats():

@@ -16,6 +16,15 @@ class SectionConstraint(BaseModel):
     min_words: Optional[int] = Field(default=None, description="Minimum word count, if any")
     max_words: int = Field(description="Maximum word count allowed for this section")
     guidance: str = Field(description="Writing guidance for this section")
+    max_heading_words: Optional[int] = Field(
+        default=None,
+        description="Word cap for this section's heading. None means the template renders no heading.",
+    )
+    heading_fallback: str = Field(
+        default="",
+        description="Heading used when generation produced none — a heading is editorial content, "
+        "so the contract only supplies a safety net, never the default.",
+    )
 
 
 class FieldWordLimit(BaseModel):
@@ -43,6 +52,16 @@ class TemplateConfig(BaseModel):
     fields: FieldConstraints
     image_slots: list[str]
     theme: ThemeColors
+    html_template: Optional[str] = Field(
+        default=None,
+        description=(
+            "Filename of this template's print stylesheet in app/pdf_templates/. "
+            "Null means the template is JSON-only and renders no PDF. Naming the file here is what "
+            "makes adding a template a config change rather than a code change (spec.md §6) — the "
+            "renderer previously hardcoded brochure_v1.html and the route hardcoded which ids could "
+            "render at all."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +92,15 @@ class ImageDescription(BaseModel):
     )
     visible_text: str = Field(default="", description="Any text or numbers visible in the image, or empty")
     summary: str = Field(description="One to two sentence summary of relevance to a company profile")
+    is_own_brand: bool = Field(
+        default=False,
+        description=(
+            "True only if this is the document owner's OWN brand mark. A company's own deck is "
+            "full of other companies' logos — customers, partners, cloud providers, certification "
+            "badges. If the mark names or depicts any company other than the document owner, this "
+            "is False. When unsure, False."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +293,9 @@ class HeadlineSubheadlineDraft(BaseModel):
 
 
 class SectionTextDraft(BaseModel):
+    heading: str = Field(
+        default="", description="Short editorial heading for this section, within its word cap"
+    )
     text: str = Field(description="The section's body text")
 
 
@@ -333,6 +364,10 @@ class CritiqueSchema(BaseModel):
 
 class ArticleSectionDraft(BaseModel):
     id: str = Field(description="Section identifier matching the template's section id")
+    heading: str = Field(
+        default="",
+        description="Short editorial heading for this section (see the template's max_heading_words)",
+    )
     text: str = Field(description="Section body text")
 
 
@@ -402,6 +437,7 @@ class GenerateRequest(BaseModel):
 
 class GenerateSection(BaseModel):
     id: str
+    heading: str = ""
     text: str
     word_count: int
     max_words: int

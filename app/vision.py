@@ -46,7 +46,7 @@ def _downsize(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
 
 
 def describe_image_subagent(
-    image_path: str, context_hint: str, config: RunnableConfig | None = None
+    image_path: str, context_hint: str, company_name: str, config: RunnableConfig | None = None
 ) -> ImageDescription:
     """`config` should be the caller's RunnableConfig, threaded down so this call
     nests under the caller's Langfuse trace. Falls back to a fresh (root) trace
@@ -73,7 +73,12 @@ def describe_image_subagent(
                 "data": b64_data,
                 "mime_type": media_type,
             },
-            {"type": "text", "text": VISION_SUBAGENT_USER_PROMPT.format(context_hint=context_hint)},
+            {
+                "type": "text",
+                "text": VISION_SUBAGENT_USER_PROMPT.format(
+                    context_hint=context_hint, company_name=company_name
+                ),
+            },
         ],
     }
 

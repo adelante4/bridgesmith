@@ -28,6 +28,10 @@ _NEW_COLUMNS = [
     ("researchrun", "differentiators", "TEXT DEFAULT '[]'"),
     ("researchrun", "proof_points", "TEXT DEFAULT '[]'"),
     ("researchrun", "recent_developments", "TEXT DEFAULT '[]'"),
+    # Existing rows predate the classification, so they backfill to 0 (not own
+    # brand) and are simply never used as a mark — failing closed rather than
+    # risking a customer's logo in the sender's masthead.
+    ("image", "is_own_brand", "BOOLEAN DEFAULT 0"),
 ]
 
 

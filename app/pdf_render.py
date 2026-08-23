@@ -16,11 +16,13 @@ import re
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
+from PIL import Image as PILImage
 from sqlmodel import Session
 from weasyprint import HTML
 
+from app import palette, richtext
 from app.models import Image
-from app.schemas import BrandGuide, GenerateResponse, ThemeColors
+from app.schemas import BrandGuide, GenerateResponse, TemplateConfig, ThemeColors
 
 logger = logging.getLogger(__name__)
 
@@ -123,34 +125,91 @@ def _resolve_asset_path(session: Session, asset_id: int | None) -> str | None:
     return image.file_path if image else None
 
 
+def _tile_color(file_path: str) -> str:
+    """Sample an asset's own background so it can be rendered on a tile of that
+    exact colour.
+
+    Extracted marks are JPEGs with no alpha, and most of Acme's are orange line
+    icons burned onto solid black. Dropped onto white paper they read as black
+    rectangles. Tiling them in their own corner colour makes each one look like
+    a deliberate chip instead, and it generalises: an asset on white gets a
+    white tile that simply disappears. Corners are sampled rather than a single
+    pixel so a mark that bleeds to one edge doesn't pick its own foreground."""
+    try:
+        with PILImage.open(file_path) as img:
+            rgb = img.convert("RGB")
+            w, h = rgb.size
+            corners = [rgb.getpixel(p) for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))]
+    except Exception:
+        logger.warning("could not sample tile colour for %s; falling back to paper", file_path)
+        return palette.PAPER
+
+    # The modal corner, so three-black-one-orange resolves to black.
+    counts: dict[tuple[int, int, int], int] = {}
+    for c in corners:
+        counts[c] = counts.get(c, 0) + 1
+    r, g, b = max(counts, key=counts.get)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def render_brochure_pdf(
     response: GenerateResponse,
     theme: ThemeColors,
     session: Session,
     company_id: str,
     article_id: int,
+    template: TemplateConfig | None = None,
+    sender_name: str = "",
 ) -> str:
     """Renders response to a PDF at data/renders/{company_id}/{article_id}.pdf
-    and returns that path. Raises on failure — the caller decides whether a
-    render failure should block the JSON response (it shouldn't; see
-    routes/generate.py, which wraps this call and degrades gracefully)."""
-    images = {
-        placeholder.slot: _resolve_asset_path(session, placeholder.asset_id)
+    and returns that path.
+
+    The stylesheet comes from the template config's `html_template`, not from a
+    constant here — adding a template is meant to be a config change (spec.md
+    §6), and hardcoding the filename made that claim untrue. Falls back to
+    brochure_v1 so existing callers keep working.
+
+    Raises on failure — the caller decides whether a render failure should
+    block the JSON response (it shouldn't; see routes/generate.py, which wraps
+    this call and degrades gracefully)."""
+    html_template = (template.html_template if template else None) or "brochure_v1.html"
+
+    image_rows = {
+        placeholder.slot: session.get(Image, placeholder.asset_id)
         for placeholder in response.image_placeholders
-        if placeholder.source_hint == "asset"
+        if placeholder.source_hint == "asset" and placeholder.asset_id is not None
+    }
+    images = {slot: row.file_path for slot, row in image_rows.items() if row is not None}
+    tile_colors = {slot: _tile_color(path) for slot, path in images.items()}
+
+    pal = palette.derive(theme.primary_color, theme.accent_color)
+    css_vars = {k: _css_value(v) for k, v in pal.as_css_vars().items()}
+
+    # Which mark slot belongs beside which section. Derived from the template's
+    # own slot list rather than hardcoded, so a template declaring more or
+    # fewer marks than it has sections degrades instead of breaking.
+    mark_slots = [s for s in (template.image_slots if template else []) if s != "masthead"]
+    section_marks = {
+        section.id: mark_slots[i] for i, section in enumerate(response.sections) if i < len(mark_slots)
     }
 
-    html = _env.get_template("brochure_v1.html").render(
+    html = _env.get_template(html_template).render(
         headline=response.headline,
         subheadline=response.subheadline,
         sections=response.sections,
         pull_quote=response.pull_quote,
         cta=response.cta,
         images=images,
+        tile_colors=tile_colors,
+        section_marks=section_marks,
+        sender_name=sender_name or company_id,
+        kicker="Partnership proposal",
+        rich=richtext.to_html,
         primary_color=_css_value(theme.primary_color),
         accent_color=_css_value(theme.accent_color),
         font_stack=_css_value(_font_stack(theme.font_family)),
         google_font_url=_google_font_url(theme.font_family),
+        **css_vars,
     )
 
     out_dir = os.path.join(RENDERS_DIR, company_id)

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+{% if google_font_url %}
+<link rel="stylesheet" href="{{ google_font_url }}">
+{% endif %}
+<style>
+  /* brochure_v2 — Swiss/editorial. Two A4 pages, no cover page: a masthead
+     opens page 1 instead. v1's full-bleed cover carried ~40 words on an
+     otherwise empty A4, which is what made the output read as a text file with
+     a coloured first page.
+
+     Everything sits on a 12-column rhythm with an asymmetric split: body text
+     in a 7-column measure (~65 characters, the readable maximum), and a
+     3-column side channel carrying section headings and brand marks. That side
+     channel is what makes the page read as designed rather than as a document
+     — it gives headings and marks somewhere to live that isn't the text
+     column.
+
+     The columns are floats, not CSS Grid, and that is deliberate. WeasyPrint
+     renders `display:grid` without error, but a grid container stretches to
+     fill the available page height, so every block claimed a page to itself
+     and this two-page brochure came out as five near-empty ones. Floats
+     fragment correctly across pages. Percentages below are the 12-column
+     positions: 3 columns is 25%, and the body column starts at column 5
+     (33.33%). */
+
+  @page {
+    size: A4;
+    margin: 18mm 18mm 16mm 18mm;
+    /* Paint the paper on the page box so the colour reaches the sheet edges.
+       On `html` alone it stops at the content box and leaves a white margin
+       frame around the page. */
+    background: {{ paper }};
+  }
+
+  * { box-sizing: border-box; }
+
+  /* Contain the floated side channel without `overflow:hidden`, which would
+     interfere with page fragmentation. */
+  .row::after {
+    content: "";
+    display: table;
+    clear: both;
+  }
+
+  :root {
+    --paper: {{ paper }};
+    --ink: {{ ink }};
+    --brand: {{ brand }};
+    --brand-text: {{ brand_text }};
+    --brand-tint: {{ brand_tint }};
+    --brand-rule: {{ brand_rule }};
+    --accent: {{ accent }};
+    --accent-text: {{ accent_text }};
+  }
+
+  html { background: var(--paper); }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: {{ font_stack }};
+    /* Type scale on a 1.333 ratio. Body sits at 9.5pt/1.6 — print body size,
+       not screen size; v1's 14px was a web default on a print canvas. */
+    font-size: 9pt;
+    line-height: 1.52;
+    -weasy-hyphens: none;
+  }
+
+  /* ---------------- masthead ---------------- */
+
+  .masthead {
+    border-bottom: 1.5pt solid var(--ink);
+    padding-bottom: 4mm;
+    margin-bottom: 7mm;
+  }
+
+  .masthead .identity { float: left; width: 70%; }
+  .masthead .mark-cell { float: right; width: 20%; text-align: right; }
+
+  .kicker {
+    font-size: 7.5pt;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--brand-text);
+    margin: 0 0 2mm 0;
+  }
+
+  .wordmark {
+    font-size: 13pt;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  /* ---------------- headline block ---------------- */
+
+  .lede { margin-bottom: 6mm; }
+
+  .lede .headline { width: 83%; }   /* 10 of 12 columns */
+  .lede .standfirst { width: 58%; } /* 7 of 12 — the readable measure */
+
+  h1 {
+    /* 38pt at 1.05 with a hard ragged right — no justification, no hyphens.
+       Tight leading on large type is the single strongest editorial signal. */
+    font-size: 30pt;
+    line-height: 1.06;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    margin: 0 0 4mm 0;
+    text-align: left;
+  }
+
+  .standfirst {
+    font-size: 12pt;
+    line-height: 1.45;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 0;
+    opacity: 0.85;
+  }
+
+  /* ---------------- body sections ---------------- */
+
+  .section {
+    margin-bottom: 6mm;
+    padding-top: 3.5mm;
+    border-top: 0.5pt solid var(--brand-rule);
+    /* A heading stranded at the foot of a page is the classic tell of an
+       unconsidered layout. */
+    break-inside: avoid;
+  }
+
+  .section .aside { float: left; width: 25%; }
+  .section .body { margin-left: 33.33%; }
+
+  .section h2 {
+    font-size: 8.5pt;
+    line-height: 1.25;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--brand-text);
+    margin: 0;
+  }
+
+  .section p {
+    margin: 0;
+    /* Old-style figures would fight the emphasised numerals; lining tabular
+       figures keep them aligned and even in colour. */
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* Emphasis the writer marked with the constrained Markdown subset. This is
+     the whole mechanism for making evidence visible: the numbers are set in
+     the brand colour a size up, so "80% of tickets" carries visual weight
+     without being lifted out of the sentence into a separate stat block. */
+  .section p strong {
+    font-weight: 700;
+    font-size: 10.5pt;
+    color: var(--brand-text);
+    letter-spacing: -0.01em;
+  }
+
+  .section p em {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* ---------------- brand marks ---------------- */
+
+  /* Each mark sits on a tile filled with the asset's own sampled corner
+     colour, so an icon burned onto black reads as a deliberate chip rather
+     than a black rectangle dropped on white paper. Ten of Acme's sixteen
+     extracted assets are exactly that. `contain` because these are marks, not
+     photographs — v1 used object-fit:cover and zoom-cropped square icons into
+     unrecognisable fragments. */
+  .tile {
+    width: 22mm;
+    height: 22mm;
+    border-radius: 1.5mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    margin-bottom: 3mm;
+  }
+
+  .tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .masthead .tile {
+    width: 16mm;
+    height: 16mm;
+    margin: 0 0 0 auto;
+  }
+
+  /* ---------------- pull quote ---------------- */
+
+  .pull-quote {
+    margin: 6mm 0;
+    padding: 4.5mm 0;
+    border-top: 1.5pt solid var(--ink);
+    border-bottom: 0.5pt solid var(--brand-rule);
+    break-inside: avoid;
+  }
+
+  .pull-quote blockquote {
+    margin: 0 0 0 8.33%;
+    width: 75%;
+    font-size: 15.5pt;
+    line-height: 1.32;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+    text-indent: -0.4em;
+  }
+
+  /* ---------------- close ---------------- */
+
+  /* Closes on the CTA — no footer, no page numbers, no generation date. On a
+     two-page document page numbers are noise, and we hold no verified contact
+     details for the sender, so printing any would be fabrication in a document
+     whose entire premise is that every claim is grounded. */
+  .close {
+    background: var(--brand-tint);
+    border-left: 2.5pt solid var(--brand);
+    padding: 6mm;
+    break-inside: avoid;
+  }
+
+  .close .label {
+    font-size: 7.5pt;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--brand-text);
+    margin: 0 0 2.5mm 0;
+  }
+
+  .close .action {
+    font-size: 14pt;
+    line-height: 1.35;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="masthead row">
+  <div class="identity">
+    <p class="kicker">{{ kicker }}</p>
+    <p class="wordmark">{{ sender_name }}</p>
+  </div>
+  <div class="mark-cell">
+    {% if images.get('masthead') %}
+    <div class="tile" style="background: {{ tile_colors.get('masthead', paper) }}">
+      <img src="{{ images['masthead'] }}" alt="">
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="lede row">
+  <h1 class="headline">{{ headline }}</h1>
+  <p class="standfirst">{{ subheadline }}</p>
+</div>
+
+{% for section in sections %}
+{% set slot = section_marks.get(section.id) %}
+<div class="section row">
+  <div class="aside">
+    {% if slot and images.get(slot) %}
+    <div class="tile" style="background: {{ tile_colors.get(slot, paper) }}">
+      <img src="{{ images[slot] }}" alt="">
+    </div>
+    {% endif %}
+    {% if section.heading %}<h2>{{ section.heading }}</h2>{% endif %}
+  </div>
+  <div class="body">
+    <p>{{ rich(section.text) }}</p>
+  </div>
+</div>
+{% endfor %}
+
+<div class="pull-quote row">
+  <blockquote>&ldquo;{{ pull_quote }}&rdquo;</blockquote>
+</div>
+
+<div class="close">
+  <p class="label">Next step</p>
+  <p class="action">{{ cta }}</p>
+</div>
+
+</body>
+</html>

@@ -8,17 +8,25 @@ repeated headers, no XML blocks the model doesn't need:
 https://developers.openai.com/api/docs/guides/latest-model.
 """
 
-VISION_SUBAGENT_SYSTEM_PROMPT = """You are looking at a single image extracted from a company's marketing/context PDF.
+VISION_SUBAGENT_SYSTEM_PROMPT = """You are looking at a single image extracted from a company's marketing/context PDF. \
+You are told which company owns the document.
 
 Describe only what is factually visible in the image:
 - Classify the image type: logo, product_screenshot, chart, diagram, photo, or other.
 - Note any visible text or numbers.
 - Give a one to two sentence summary of its relevance to understanding this company for a marketing profile.
+- Set is_own_brand: true ONLY when the image is the document owner's own brand mark. A company's own deck is \
+full of other companies' marks — customer logos on a reference slide, partner and cloud-provider badges, \
+certification seals, award emblems. If the mark names or depicts any company other than the document owner, \
+is_own_brand is false. A decorative icon or illustration that is not a company mark at all is also false. \
+When you cannot tell whose mark it is, answer false.
 
 Do not speculate beyond what is visible. Do not invent claims about the company. If the image is unreadable, \
 too small, or purely decorative, classify it as "other" and say so in the summary rather than guessing."""
 
-VISION_SUBAGENT_USER_PROMPT = """Context surrounding this image in the source document:
+VISION_SUBAGENT_USER_PROMPT = """This image was extracted from a PDF belonging to: {company_name}
+
+Context surrounding this image in the source document:
 {context_hint}"""
 
 
@@ -331,6 +339,14 @@ not write "reported", "claimed", "could", "would", "may", "proposed", "aims to",
 you were handed. State it. If a claim genuinely cannot be stated plainly, drop the claim and use a different \
 fact — never keep it and qualify it.
 
+Emphasis: the page sets marked text larger and in the brand colour, so mark the evidence a reader should catch \
+while skimming. Wrap the single strongest measured result in double asterisks, and at most one supporting \
+detail in single asterisks — for example, routed **80% of tickets** correctly and replied *three times faster*. \
+Mark quantities and outcomes, never whole sentences and never a company name on its own. Two marks per section \
+is the maximum; a page where everything is emphasised has nothing emphasised, and a section with no measured \
+result should carry no marks at all. These two are the only markup you may use: no other symbols, no headings, \
+no links, no lists.
+
 Style rules:
 - One idea per sentence. Prefer a period over a comma splice or a dash.
 - Never stack adjectives. "governed, production-ready, cross-cloud finance intelligence" is four words of \
@@ -432,6 +448,11 @@ limit.
 Preserve every concrete anchor. Numbers, dates, named customers, and named products are the most valuable words \
 in the draft — when you tighten a sentence, cut the abstraction around the fact, never the fact. A polished \
 version with fewer specifics than the draft is a worse version.
+
+Section text may contain emphasis markup: double asterisks around the strongest measured result, single \
+asterisks around one supporting detail. Preserve it exactly as written — keep the markers attached to the same \
+words, do not add new ones, and do not introduce any other symbol or markup. Emphasis markers do not count \
+toward word limits.
 
 Do not add hedges. If a drafted piece states something plainly, keep it plain: do not introduce "reported", \
 "could", "would", "proposed", "aims to", or "may" while tightening. Do not stack adjectives, and do not \
