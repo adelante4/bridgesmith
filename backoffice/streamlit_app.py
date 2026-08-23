@@ -20,9 +20,19 @@ import streamlit as st
 from sqlmodel import Session, select
 
 from app.db import engine
+from app.templates import TEMPLATES_DIR
 from app.models import Company, Description, GeneratedArticle, Image, PdfDigest, ResearchRun
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
+
+
+def list_template_ids() -> list[str]:
+    """Template IDs from TEMPLATES_DIR, newest file first (default choice)."""
+    templates = Path(TEMPLATES_DIR)
+    if not templates.is_dir():
+        return []
+    files = sorted(templates.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return [p.stem for p in files]
 
 st.set_page_config(page_title="Marketing Automation Backoffice", layout="wide")
 
@@ -252,7 +262,11 @@ elif page == "Generate":
     prompt = st.text_area(
         "Prompt", placeholder="e.g. Write a newsletter pitching our analytics platform to their ops team"
     )
-    template_id = st.text_input("Template ID", value="b2b_newsletter_v1")
+    template_ids = list_template_ids()
+    if template_ids:
+        template_id = st.selectbox("Template", template_ids)
+    else:
+        template_id = st.text_input("Template ID", value="b2b_newsletter_v1")
 
     if st.button("Generate", type="primary", disabled=not prompt):
         with st.spinner("Generating — this calls the LLM and can take a minute…"):
