@@ -115,19 +115,28 @@ class CompanyProfileSchema(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Generation-time research schemas (research_sender / research_receiver nodes)
+# Generation-time research schemas (plan_research / research nodes)
 # ---------------------------------------------------------------------------
 
 
-class ResearchBriefSchema(BaseModel):
-    """research_brief's with_structured_output target: what each per-company
-    researcher should go find before the article gets written."""
+class ResearchPerspective(BaseModel):
+    """One STORM-style perspective on the article: a reader/stakeholder whose
+    concerns generate the questions worth researching."""
 
-    sender_dimensions: list[str] = Field(
-        description="Concrete facts to confirm/find about the sender: proof points, offerings, recent news"
+    name: str = Field(
+        description="Who holds this perspective, e.g. 'budget decision-maker at the receiver', 'sender proof-point verifier'"
     )
-    receiver_dimensions: list[str] = Field(
-        description="Concrete facts to confirm/find about the receiver: pain points, recent news, industry context"
+    questions: list[str] = Field(
+        description="2-4 concrete, searchable questions this perspective needs answered that the profiles don't already answer"
+    )
+
+
+class ResearchPlanSchema(BaseModel):
+    """plan_research's with_structured_output target: perspective-guided
+    questions (STORM) scoped to this sender/receiver pairing and creative brief."""
+
+    perspectives: list[ResearchPerspective] = Field(
+        description="2-3 perspectives tailored to this article, each with its research questions"
     )
 
 
@@ -137,9 +146,9 @@ class ResearchFact(BaseModel):
 
 
 class CompressedResearchSchema(BaseModel):
-    """research_sender/research_receiver's with_structured_output target — the
-    per-company researcher's final structured answer, already in the
-    fact-plus-source shape the outline/writer stages consume directly."""
+    """research node's with_structured_output target — the researcher's final
+    structured answer, already in the fact-plus-source shape the outline/writer
+    stages consume directly."""
 
     facts: list[ResearchFact] = Field(description="Researched facts about this company, each with its source")
 

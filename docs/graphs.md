@@ -26,16 +26,17 @@ Runs on `POST /context`. `extract_pdf_structure` / `profile_company` fork depend
 
 ## Generation graph (`app/graphs/generation_graph.py`)
 
-Runs on `POST /generate`. STORM-style: research the two companies for *this* pairing, outline before writing,
-draft section by section, then polish/critique/validate. `critique` loops back through `revise` (at most
-`MAX_REVISE_ATTEMPTS`, 1) before `validate`; `validate` loops back through `repair` (at most `MAX_REPAIR_ATTEMPTS`,
-2) before falling through to `finalize_article`. See `docs/adr/0003-generation-research-and-storm-drafting.md`.
+Runs on `POST /generate`. STORM trimmed to its core: perspectives generate the questions, questions drive the
+searches; outline before writing, draft section by section, then polish/critique/validate. `critique` loops back
+through `revise` (at most `MAX_REVISE_ATTEMPTS`, 1) before `validate`; `validate` loops back through `repair`
+(at most `MAX_REPAIR_ATTEMPTS`, 2) before falling through to `finalize_article`. See
+`docs/adr/0003-generation-research-and-storm-drafting.md` and `docs/adr/0004-perspective-guided-research.md`.
 
 ![generation graph](graphs/generation_graph.png)
 
 - `load_profiles` — loads latest sender/receiver `CompanyProfile` rows and company names.
-- `research_brief` — no-tool LLM call turning both profiles + the creative brief into a concrete per-company research dimension list.
-- `research_sender` / `research_receiver` — run in parallel; each is an isolated `deepagents.create_deep_agent` (same idiom as `app/deep_research.py`) with a `web_search` tool and a `fact-finder` sub-agent, budgeted in-prompt to ~5 searches. Structured output is a list of facts with source URLs — the research pass and the "compress" step are the same call: the agent's final structured answer *is* the cleaned fact list.
+- `plan_research` — STORM perspective-guided question asking: one no-tool LLM call derives 2-3 perspectives of people who will judge this article (e.g. budget decision-maker at the receiver, technical evaluator, sender proof-point verifier) with 2-4 searchable questions each — explicitly excluding anything the ingestion-time profiles already answer.
+- `research` — one `deepagents.create_deep_agent` (same idiom as `app/deep_research.py`) with a `web_search` tool and a `fact-finder` sub-agent, budgeted in-prompt to ~6 searches, answers the perspective questions. Structured output is a list of facts with source URLs — the research pass and the "compress" step are the same call: the agent's final structured answer *is* the cleaned fact list.
 - `outline` — LLM call mapping template slots (headline, each section, pull quote, CTA) to a specific subset of the researched facts, before any prose exists.
 - `draft_sections` — one structured-output call per template unit (headline+subheadline together, each body section, pull_quote+cta together), each fed only its outline-assigned facts and the receiver's tone_signals.
 - `polish` — assembles the drafted pieces into one `ArticleSchema`: smooths transitions, dedupes, strengthens the lead, picks image placeholder asset aliases, and lists the `sources` actually used. Keeps a `polish_messages` conversation for `revise` to extend.

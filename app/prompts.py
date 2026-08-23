@@ -133,58 +133,67 @@ and do not add new facts, statistics, or claims."""
 
 
 # ---------------------------------------------------------------------------
-# Generation-time research (research_brief / research_sender / research_receiver)
+# Generation-time research (plan_research / research) — STORM-style
+# perspective-guided question asking, trimmed to its core: perspectives
+# generate the questions, questions drive the searches.
 # ---------------------------------------------------------------------------
 
-RESEARCH_BRIEF_SYSTEM_PROMPT = """You are scoping research for a tailored B2B marketing article that bridges a \
-Sender company and a Receiver company. You will not write the article or search anything yourself — you only \
-decide what is worth finding out before anyone does.
+RESEARCH_PLAN_SYSTEM_PROMPT = """You are planning research for a tailored B2B sales/marketing article that \
+bridges a Sender company (whose offering the article promotes) and a Receiver company (whose reader it must \
+win over). You will not write or search anything yourself — you only decide which questions are worth answering \
+first.
 
-List concrete, specific dimensions to research for each company — not vague topics. For the sender: proof points \
-and specifics behind its offerings, differentiators, recent news or announcements. For the receiver: recent news, \
-concrete pain points relevant to what the sender offers, industry context that would make the article feel \
-specific to them rather than generic. Ground every dimension in the creative brief and the existing profiles — \
-don't ask for research that's already answered by the profile you were given."""
+Work perspective-first: pick 2-3 perspectives of people who will actually judge this article — readers at the \
+Receiver (e.g. the budget decision-maker weighing cost against their current pain, a technical or operational \
+evaluator checking whether the offering fits how they work) and, when the brief leans on sender claims, a \
+sender proof-point verifier who demands evidence behind them. Choose perspectives that fit THIS pairing and \
+creative brief, not a stock list.
 
-RESEARCH_BRIEF_USER_PROMPT = """Sender profile:
+For each perspective, write 2-4 concrete, searchable questions that perspective would need answered before \
+believing the article. Every question must target something the given profiles do NOT already answer — recent \
+news, specific numbers, named customers or case studies, current industry pressure. Skip any question whose \
+answer is already sitting in a profile."""
+
+RESEARCH_PLAN_USER_PROMPT = """Sender ({sender_name}) profile:
 {sender_profile}
 
-Receiver profile:
+Receiver ({receiver_name}) profile:
 {receiver_profile}
 
 Creative brief from the requester: {user_prompt}"""
 
 
-GENERATION_RESEARCH_SYSTEM_PROMPT = """You are researching a single company (its role in the article and name are \
-given below) to support a B2B marketing article. You are given the company's existing profile and a list of \
-research dimensions to confirm or fill in. You have a web_search tool and a fact-finder sub-agent, both able to \
-search the web.
+GENERATION_RESEARCH_SYSTEM_PROMPT = """You are researching answers for a B2B sales/marketing article that \
+bridges a Sender and a Receiver company. You are given both companies' existing profiles and a list of \
+perspective-guided questions — each from the viewpoint of someone who will judge the article. You have a \
+web_search tool and a fact-finder sub-agent, both able to search the web.
 
-Plan your work with the todo tool. Delegate targeted searches to the fact-finder sub-agent one dimension (or a \
-small cluster of related dimensions) at a time; use web_search yourself for quick follow-ups. Search rather than \
-relying on what you already know — recent news and positioning go stale.
+Plan your work with the todo tool. Delegate one question (or a small cluster of related questions) at a time to \
+the fact-finder sub-agent; use web_search yourself for quick follow-ups. Search rather than relying on what you \
+already know — recent news and positioning go stale.
 
-Budget: at most 5 total search calls across yourself and the sub-agent for this company. Stop searching once you \
-can answer the listed dimensions confidently, or once two searches in a row return nothing new — do not keep \
-delegating for completeness's sake.
+Budget: at most 6 total search calls across yourself and the sub-agent. Stop once the questions are answered \
+confidently, or once two searches in a row return nothing new — an honestly unanswered question is better than \
+a padded answer.
 
 Once done, produce the final structured output: a list of facts, each a single clean claim with the URL it came \
-from (source_url null only if you are certain of a fact from the given profile itself, not from web search). Do \
-not fabricate facts or sources. Do not summarize away specifics — keep facts concrete and usable by a writer who \
-has not seen your research."""
+from (source_url null only if the fact comes straight from a given profile, not from web search). Do not \
+fabricate facts or sources. Do not summarize away specifics — keep numbers, names, and dates intact for a \
+writer who has not seen your research."""
 
-GENERATION_RESEARCH_USER_PROMPT = """Company ({role}): {company_name}
+GENERATION_RESEARCH_USER_PROMPT = """Sender ({sender_name}) profile:
+{sender_profile}
 
-Existing profile:
-{profile}
+Receiver ({receiver_name}) profile:
+{receiver_profile}
 
-Research dimensions to confirm or fill in:
-{dimensions}"""
+Perspective-guided research questions:
+{questions}"""
 
 GENERATION_FACT_FINDER_SUBAGENT_PROMPT = """You are a focused fact-finder. Given one or a few related research \
-dimensions about a company, use the web_search tool to find concrete, current facts — max 4 searches. Stop once \
-the last 2 searches returned nothing new. Report back each fact as a short claim plus the URL it came from. Do \
-not fabricate facts or sources."""
+questions about a company or its market, use the web_search tool to find concrete, current facts — max 4 \
+searches. Stop once the last 2 searches returned nothing new. Report back each fact as a short claim plus the \
+URL it came from. Do not fabricate facts or sources."""
 
 
 # ---------------------------------------------------------------------------
@@ -192,14 +201,14 @@ not fabricate facts or sources."""
 # ---------------------------------------------------------------------------
 
 OUTLINE_SYSTEM_PROMPT = """You are outlining a tailored B2B marketing article that bridges a Sender company and a \
-Receiver company, before any prose is written. You are given both company profiles, researched facts about each \
-(with sources), the creative brief, and the template's section layout.
+Receiver company, before any prose is written. You are given both company profiles, researched facts (with \
+sources), the creative brief, and the template's section layout.
 
 For each template unit (headline, subheadline, each body section, pull quote, CTA), decide its angle and which \
 researched facts it will use — copy the fact text verbatim into fact_refs so the writer can be given exactly that \
-subset. A section with no receiver-side facts assigned is a sign the article risks feeling generic — prefer \
-assigning at least one receiver fact per body section when the research supports it. Do not assign a fact to more \
-than one section unless it is genuinely central to both."""
+subset. A section with no receiver-relevant facts assigned is a sign the article risks feeling generic — prefer \
+assigning at least one receiver-relevant fact per body section when the research supports it. Do not assign a \
+fact to more than one section unless it is genuinely central to both."""
 
 OUTLINE_USER_PROMPT = """Sender profile:
 {sender_profile}
@@ -207,11 +216,8 @@ OUTLINE_USER_PROMPT = """Sender profile:
 Receiver profile:
 {receiver_profile}
 
-Sender research:
-{sender_research}
-
-Receiver research:
-{receiver_research}
+Researched facts:
+{research}
 
 Creative brief from the requester: {user_prompt}
 
@@ -299,11 +305,8 @@ suggest edits that would add new facts not present in the research."""
 CRITIQUE_USER_PROMPT = """Article:
 {article}
 
-Sender research:
-{sender_research}
-
-Receiver research:
-{receiver_research}"""
+Researched facts:
+{research}"""
 
 REVISE_TURN_USER_PROMPT = """A critique pass found the following required edits:
 
