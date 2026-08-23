@@ -6,7 +6,9 @@ Full technical design: [`spec.md`](spec.md). Cloud architecture design: [`docs/a
 
 ## Architecture in one paragraph
 
-Two LangGraph-orchestrated pipelines. **Ingestion** (`POST /context`): deterministic PyMuPDF extraction of an image-annotated transcript → a tool-calling Claude agent that reads the transcript and selectively calls a vision subagent to describe relevant images → a structured digest → a LangChain deep research agent (`deepagents.create_deep_agent`, plans with a todo list, delegates to a company-research sub-agent bound to Claude's native web search) that produces a structured company profile, persisted once and reused by every future `/generate` call for that company. **Generation** (`POST /generate`): load both company profiles → build a grounded prompt against the template's constraints → generate structured output → validate word limits in code → targeted repair loop (max 2 attempts, then hard-truncate) → match image slots to extracted assets. See `spec.md` §3 and `app/deep_research.py` for the full node-by-node design and rationale.
+Two LangGraph-orchestrated pipelines. **Ingestion** (`POST /context`): deterministic PyMuPDF extraction of an image-annotated transcript → a tool-calling Claude agent that reads the transcript and selectively calls a vision subagent to describe relevant images → a structured digest → a LangChain deep research agent (`deepagents.create_deep_agent`, plans with a todo list, delegates to a company-research sub-agent bound to Claude's native web search) that produces a structured company profile, persisted once and reused by every future `/generate` call for that company. **Generation** (`POST /generate`): aggregate everything on file for both companies → plan perspective-guided research (STORM) → answer it with a web-search agent → outline, assigning specific facts to specific sections → draft each section, then write the headline, pull quote and CTA *from the finished body* → polish → critique/revise (bounded by rubric score, not by the critic running out of opinions) → validate word limits and a concrete-anchor gate in code → targeted repair loop (max 2 attempts, then hard-truncate) → match image slots to extracted assets → optionally render to PDF.
+
+Two invariants keep the prose from collapsing into generic hedged filler, both learned the hard way: only *evidence* facts reach a writer (caveats — things research could not verify — go to the critic instead), and anything that comments on the article is written after it. See `docs/adr/0006-evidence-caveat-split.md`, plus `spec.md` §3 and `app/deep_research.py` for the node-by-node rationale.
 
 ## Prerequisites
 
@@ -89,6 +91,9 @@ curl -X POST http://localhost:8000/generate \
 Deliberately not built:
 
 - Rendering the final newsletter/brochure (InDesign/Figma/HTML) — the deliverable is the JSON contract only.
+  **Built anyway, beyond spec:** `brochure_v1` and `brochure_v2` render to PDF via WeasyPrint as a demo artifact,
+  to show the JSON contract maps onto a real layout. `b2b_newsletter_v1` stays JSON-only. This is a presentation
+  aid, not a claim about the deliverable — see `docs/adr/0007-brochure-v2-print-design.md`.
 - Vector search / embeddings / RAG — at 1-2 PDFs per company, full text fits in context. See `spec.md` §12 for the upgrade trigger.
 - Auth / multi-tenancy enforcement.
 - A full automated test suite (a few smoke tests are included, non-blocking — see below).
@@ -126,13 +131,19 @@ app/
   pdf_extraction.py       PyMuPDF parsing -> annotated transcript + saved images
   vision.py                describe_image vision subagent
   llm.py                   LLM model construction (provider-agnostic + Anthropic-specific)
-  deep_research.py          profile_company via deepagents.create_deep_agent
+  deep_research.py          deep research run via deepagents.create_deep_agent
   prompts.py                module-level prompt string constants
   templates.py               layout template config loader
+  pdf_render.py               WeasyPrint HTML -> PDF (beyond spec; see ADR 0007)
+  palette.py                  derive a print palette from detected brand colors
+  richtext.py                 two-marker Markdown subset for in-prose emphasis
+  context_store.py            append-only per-company context logs
+  observability.py            Langfuse tracing
   graphs/
     ingestion_agent.py       tool-calling agent: describe_image + submit_digest tools
-    ingestion_graph.py       extract -> agent -> persist_digest -> profile_company -> persist_profile
-    generation_graph.py      load_profiles -> ... -> select_assets
+    ingestion_graph.py       extract -> agent -> persist_digest -> extract_brand
+    generation_graph.py      load_profiles -> research -> outline -> draft -> polish -> critique -> validate
+  pdf_templates/              print stylesheets, one per rendering template
   routes/
     context.py                POST /context
     generate.py                POST /generate

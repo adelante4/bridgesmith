@@ -29,12 +29,20 @@ The plain markdown concatenation of everything on file for a company — every `
 _Avoid_: Profile, Summary (a specific `ResearchRun.summary` field, not the blob).
 
 **Image**:
-An extracted image asset, scoped to the specific `PdfDigest` run that produced it — not a company-wide flat pool. `/generate`'s asset matching only considers images from a company's *newest* `PdfDigest`.
+An extracted image asset, scoped to the specific `PdfDigest` run that produced it — not a company-wide flat pool. `/generate`'s asset matching only considers images from a company's *newest* `PdfDigest`. Carries `is_own_brand`: whether the mark belongs to the company whose document it came from. A company deck is full of *other* companies' logos (customers, partners, cloud providers) and `tag` cannot tell them apart — Acme's own mark and its customer Bolt's are both `tag=logo` — so ownership is a separate signal set by the ingestion vision pass. See `docs/adr/0007-brochure-v2-print-design.md`.
 _Avoid_: Asset (used loosely elsewhere for "extracted image or stock query hint" generically — Image specifically means a row with a `file_path`).
 
 **Template**:
-A fixed publishing-layout contract (word limits, image slots, theme colors) supplied by Customer C's design team, loaded from `config/templates/*.json`. Never derived from company data, never invented by the LLM.
+A fixed publishing-layout contract (word limits, section and heading caps, image slots, theme colors) supplied by Customer C's design team, loaded from `config/templates/*.json`. Never derived from company data, never invented by the LLM. A template also names its own print stylesheet in `html_template` (`null` = JSON-only, renders no PDF), so which templates produce a PDF is a property of the template rather than a list maintained in the route.
 _Avoid_: Schema (that's the Pydantic/ORM sense elsewhere in the codebase), Layout.
+
+**Evidence** / **Caveat**:
+The two kinds of `ResearchFact` a generation-time research run produces. **Evidence** states something that is the case — a number, a date, a named customer, a shipped capability. A **caveat** records an absence or a limit: something that could not be verified, or a boundary on what another fact supports. Only evidence ever reaches a writer; caveats go to the outline as judgement context and to the critique node as an accuracy check. Handing a copywriter a majority of negations under a "write only from these facts" instruction is what produced the pipeline's hedged-prose failure. See `docs/adr/0006-evidence-caveat-split.md`.
+_Avoid_: "negative fact" (a caveat is not a fact about the company, it is a fact about the research), Limitation.
+
+**Palette**:
+The derived print colour set (`app/palette.py`) — paper, ink, brand tint/rule/text, accent — computed from a `PdfDigest`'s two detected brand hexes. Distinct from **theme**, which is the raw `primary_color`/`accent_color`/`font_family` triple carried on the template and the article. A theme is the input; a palette is what a page is allowed to paint with, and no detected colour is ever painted across a full page.
+_Avoid_: Theme (that's the raw detected triple), Brand colors (ambiguous between the two).
 
 **Article** / **GeneratedArticle**:
 The generated JSON output for one sender/receiver/prompt/template combination. Records which `PdfDigest` (sender + receiver, nullable — a company can be generated for with zero PDF uploads) was the company's newest at generation time, so a past article stays traceable even after either company's context has since changed.
