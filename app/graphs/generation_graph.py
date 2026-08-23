@@ -69,7 +69,7 @@ from app.schemas import (
 logger = logging.getLogger(__name__)
 
 MAX_REPAIR_ATTEMPTS = 2
-MAX_REVISE_ATTEMPTS = 1
+MAX_REVISE_ATTEMPTS = 4
 MAX_RESEARCH_SEARCHES = 6  # enforced via prompt budget, not code — see GENERATION_RESEARCH_SYSTEM_PROMPT
 
 
