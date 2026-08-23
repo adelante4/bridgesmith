@@ -53,7 +53,8 @@ def generate_article(request: GenerateRequest, session: Session = Depends(get_se
         cta=final_state["final_cta"],
         image_placeholders=final_state["image_placeholders"],
         theme=template.theme,
-        grounding_notes="All claims sourced from sender/receiver company profiles (uploaded context, supplemented by web search performed once at ingestion time); no unverified figures included.",
+        grounding_notes="All claims sourced from sender/receiver company profiles plus per-generation web research on both companies; no unverified figures included.",
+        sources=final_state["draft"].sources,
     )
 
     session.add(

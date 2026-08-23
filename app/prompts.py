@@ -123,3 +123,185 @@ REPAIR_TURN_USER_PROMPT = """The article you produced has the following problems
 Re-emit the complete corrected article in the same structured format. Fix only the listed problems; copy every \
 other field verbatim from your previous version. When shortening or expanding a field, preserve its key claim(s) \
 and do not add new facts, statistics, or claims."""
+
+
+# ---------------------------------------------------------------------------
+# Generation-time research (research_brief / research_sender / research_receiver)
+# ---------------------------------------------------------------------------
+
+RESEARCH_BRIEF_SYSTEM_PROMPT = """You are scoping research for a tailored B2B marketing article that bridges a \
+Sender company and a Receiver company. You will not write the article or search anything yourself — you only \
+decide what is worth finding out before anyone does.
+
+List concrete, specific dimensions to research for each company — not vague topics. For the sender: proof points \
+and specifics behind its offerings, differentiators, recent news or announcements. For the receiver: recent news, \
+concrete pain points relevant to what the sender offers, industry context that would make the article feel \
+specific to them rather than generic. Ground every dimension in the creative brief and the existing profiles — \
+don't ask for research that's already answered by the profile you were given."""
+
+RESEARCH_BRIEF_USER_PROMPT = """Sender profile:
+{sender_profile}
+
+Receiver profile:
+{receiver_profile}
+
+Creative brief from the requester: {user_prompt}"""
+
+
+GENERATION_RESEARCH_SYSTEM_PROMPT = """You are researching a single company (its role in the article and name are \
+given below) to support a B2B marketing article. You are given the company's existing profile and a list of \
+research dimensions to confirm or fill in. You have a web_search tool and a fact-finder sub-agent, both able to \
+search the web.
+
+Plan your work with the todo tool. Delegate targeted searches to the fact-finder sub-agent one dimension (or a \
+small cluster of related dimensions) at a time; use web_search yourself for quick follow-ups. Search rather than \
+relying on what you already know — recent news and positioning go stale.
+
+Budget: at most 5 total search calls across yourself and the sub-agent for this company. Stop searching once you \
+can answer the listed dimensions confidently, or once two searches in a row return nothing new — do not keep \
+delegating for completeness's sake.
+
+Once done, produce the final structured output: a list of facts, each a single clean claim with the URL it came \
+from (source_url null only if you are certain of a fact from the given profile itself, not from web search). Do \
+not fabricate facts or sources. Do not summarize away specifics — keep facts concrete and usable by a writer who \
+has not seen your research."""
+
+GENERATION_RESEARCH_USER_PROMPT = """Company ({role}): {company_name}
+
+Existing profile:
+{profile}
+
+Research dimensions to confirm or fill in:
+{dimensions}"""
+
+GENERATION_FACT_FINDER_SUBAGENT_PROMPT = """You are a focused fact-finder. Given one or a few related research \
+dimensions about a company, use the web_search tool to find concrete, current facts — max 4 searches. Stop once \
+the last 2 searches returned nothing new. Report back each fact as a short claim plus the URL it came from. Do \
+not fabricate facts or sources."""
+
+
+# ---------------------------------------------------------------------------
+# Outline (outline node)
+# ---------------------------------------------------------------------------
+
+OUTLINE_SYSTEM_PROMPT = """You are outlining a tailored B2B marketing article that bridges a Sender company and a \
+Receiver company, before any prose is written. You are given both company profiles, researched facts about each \
+(with sources), the creative brief, and the template's section layout.
+
+For each template unit (headline, subheadline, each body section, pull quote, CTA), decide its angle and which \
+researched facts it will use — copy the fact text verbatim into fact_refs so the writer can be given exactly that \
+subset. A section with no receiver-side facts assigned is a sign the article risks feeling generic — prefer \
+assigning at least one receiver fact per body section when the research supports it. Do not assign a fact to more \
+than one section unless it is genuinely central to both."""
+
+OUTLINE_USER_PROMPT = """Sender profile:
+{sender_profile}
+
+Receiver profile:
+{receiver_profile}
+
+Sender research:
+{sender_research}
+
+Receiver research:
+{receiver_research}
+
+Creative brief from the requester: {user_prompt}
+
+Template sections (id: guidance, word limits):
+{template_constraints}"""
+
+
+# ---------------------------------------------------------------------------
+# Section drafting (draft_sections node — one call per template unit)
+# ---------------------------------------------------------------------------
+
+SECTION_WRITER_SYSTEM_PROMPT = """You are writing one piece of a B2B marketing article that bridges a Sender \
+company and a Receiver company. You are given the outline's plan for this piece and the exact facts it may use — \
+write only from those facts and the two company profiles; do not invent facts, statistics, or claims about either \
+company, and do not use a fact that wasn't given to you for this piece. Write for the Receiver's audience in a \
+tone matching their tone_signals. Respect the word limit strictly."""
+
+SECTION_WRITER_USER_PROMPT = """Piece to write: {unit_label}
+Word limit: {word_limit}
+Guidance: {guidance}
+Angle: {angle}
+
+Facts you may use for this piece:
+{facts}
+
+Sender profile summary: {sender_summary}
+Receiver profile summary: {receiver_summary}
+Receiver tone_signals: {receiver_tone}"""
+
+
+# ---------------------------------------------------------------------------
+# Polish (polish node — assembles drafted pieces into the final ArticleSchema)
+# ---------------------------------------------------------------------------
+
+POLISH_SYSTEM_PROMPT = """You are polishing an already-drafted B2B marketing article into its final form. The \
+headline, subheadline, each section, the pull quote, and the CTA were each drafted separately against an outline \
+— your job is to assemble them into one coherent piece: smooth transitions between sections, fix any duplicated \
+points, strengthen the lead if it's weak, and lightly tighten wording. Do not add new facts, statistics, or claims \
+that weren't in the drafted pieces. Preserve every word-limit compliance already present — do not lengthen a \
+field that is already at its limit.
+
+Produce one entry in image_placeholders for each requested image slot — each with a slot id, alt text describing \
+the ideal image for that slot, and an asset_alias picked from the sender asset catalog when a listed asset \
+genuinely fits that slot (set asset_alias to null otherwise). Only use aliases that appear in the catalog. For \
+the 'hero' slot, prefer a logo-tagged asset when one is listed.
+
+Populate sources with every source_url actually behind a claim you kept in the final article — omit facts you \
+dropped, dedupe URLs."""
+
+POLISH_USER_PROMPT = """Drafted headline: {headline}
+Drafted subheadline: {subheadline}
+
+Drafted sections:
+{sections}
+
+Drafted pull quote: {pull_quote}
+Drafted CTA: {cta}
+
+Template constraints (respect these word limits strictly):
+{template_constraints}
+
+Image slots needing a placeholder entry: {image_slots}
+
+Sender asset catalog (choose asset_alias values from here, or null):
+{sender_assets}
+
+All facts available (with sources) — only cite ones actually used above:
+{all_facts}"""
+
+
+# ---------------------------------------------------------------------------
+# Critique + revise (critique node)
+# ---------------------------------------------------------------------------
+
+CRITIQUE_SYSTEM_PROMPT = """You are critiquing a finished B2B marketing article against the research it was \
+supposed to be grounded in. Score each rubric dimension 0-1: fact_grounding (every company-specific claim traces \
+to a researched fact or profile — no invented specifics), personalization (how specifically it connects the \
+sender's offering to the receiver's actual situation, not generic B2B language), tone_match (matches the \
+receiver's tone_signals), structure (flow, lead strength, no duplication across sections).
+
+List required_edits as concrete, actionable instructions (e.g. "section 'body_intro' repeats the claim already \
+made in the headline — cut it there") — leave required_edits empty only if the article needs no changes. Do not \
+suggest edits that would add new facts not present in the research."""
+
+CRITIQUE_USER_PROMPT = """Article:
+{article}
+
+Sender research:
+{sender_research}
+
+Receiver research:
+{receiver_research}"""
+
+REVISE_TURN_USER_PROMPT = """A critique pass found the following required edits:
+
+{required_edits}
+
+Re-emit the complete corrected article in the same structured format, applying exactly these edits. Do not add \
+new facts, statistics, or claims beyond what the edits ask for, and do not change anything the critique didn't \
+flag."""

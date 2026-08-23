@@ -93,6 +93,97 @@ class CompanyProfileSchema(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Generation-time research schemas (research_sender / research_receiver nodes)
+# ---------------------------------------------------------------------------
+
+
+class ResearchBriefSchema(BaseModel):
+    """research_brief's with_structured_output target: what each per-company
+    researcher should go find before the article gets written."""
+
+    sender_dimensions: list[str] = Field(
+        description="Concrete facts to confirm/find about the sender: proof points, offerings, recent news"
+    )
+    receiver_dimensions: list[str] = Field(
+        description="Concrete facts to confirm/find about the receiver: pain points, recent news, industry context"
+    )
+
+
+class ResearchFact(BaseModel):
+    fact: str = Field(description="A single researched fact, cleaned up, not summarized away")
+    source_url: Optional[str] = Field(default=None, description="URL the fact was found at, if any")
+
+
+class CompressedResearchSchema(BaseModel):
+    """research_sender/research_receiver's with_structured_output target — the
+    per-company researcher's final structured answer, already in the
+    fact-plus-source shape the outline/writer stages consume directly."""
+
+    facts: list[ResearchFact] = Field(description="Researched facts about this company, each with its source")
+
+
+# ---------------------------------------------------------------------------
+# Outline schema (outline node)
+# ---------------------------------------------------------------------------
+
+
+class OutlineSectionPlan(BaseModel):
+    id: str = Field(description="Section identifier matching the template's section id")
+    angle: str = Field(description="What this section will argue/cover")
+    fact_refs: list[str] = Field(
+        default_factory=list, description="Verbatim fact strings (from the research notes) this section will use"
+    )
+
+
+class ArticleOutlineSchema(BaseModel):
+    """outline node's with_structured_output target — a plan mapping template
+    slots to the specific facts each will use, written before any prose."""
+
+    headline_angle: str = Field(description="The angle/hook the headline should take")
+    subheadline_angle: str = Field(description="What the subheadline should add beyond the headline")
+    sections: list[OutlineSectionPlan] = Field(description="One plan entry per template section id")
+    pull_quote_angle: str = Field(description="What the pull quote should capture")
+    cta_angle: str = Field(description="What action the CTA should drive toward")
+
+
+# ---------------------------------------------------------------------------
+# Section-drafting schemas (draft_sections node — one call per template unit)
+# ---------------------------------------------------------------------------
+
+
+class HeadlineSubheadlineDraft(BaseModel):
+    headline: str = Field(description="Article headline")
+    subheadline: str = Field(description="Article subheadline")
+
+
+class SectionTextDraft(BaseModel):
+    text: str = Field(description="The section's body text")
+
+
+class QuoteCtaDraft(BaseModel):
+    pull_quote: str = Field(description="Short pull quote")
+    cta: str = Field(description="Call to action")
+
+
+# ---------------------------------------------------------------------------
+# Critique schema (critique node)
+# ---------------------------------------------------------------------------
+
+
+class CritiqueSchema(BaseModel):
+    """critique node's with_structured_output target — a rubric score plus
+    concrete edits, not a vague verdict."""
+
+    fact_grounding: float = Field(description="0-1: every company claim traces to a researched fact or profile")
+    personalization: float = Field(description="0-1: how specifically the article connects sender to receiver")
+    tone_match: float = Field(description="0-1: how well the writing matches the receiver's tone_signals")
+    structure: float = Field(description="0-1: flow, lead strength, lack of duplication across sections")
+    required_edits: list[str] = Field(
+        default_factory=list, description="Concrete, actionable edits; empty when no revision is needed"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Generation structured-output schema (Article)
 # ---------------------------------------------------------------------------
 
@@ -115,7 +206,7 @@ class ImagePlaceholderDraft(BaseModel):
 
 
 class ArticleSchema(BaseModel):
-    """generate_draft's with_structured_output target. Never includes code-computed
+    """polish node's with_structured_output target. Never includes code-computed
     fields like word_count/truncated/theme — those are added downstream."""
 
     headline: str = Field(description="Article headline")
@@ -125,6 +216,9 @@ class ArticleSchema(BaseModel):
     cta: str = Field(description="Call to action")
     image_placeholders: list[ImagePlaceholderDraft] = Field(
         description="One entry per template image slot, with alt text describing the desired image"
+    )
+    sources: list[str] = Field(
+        default_factory=list, description="URLs of researched facts actually used in the article, for traceability"
     )
 
 
@@ -176,6 +270,7 @@ class GenerateResponse(BaseModel):
     image_placeholders: list[GenerateImagePlaceholder]
     theme: ThemeColors
     grounding_notes: str
+    sources: list[str] = Field(default_factory=list)
 
 
 class CompanyProfileResponse(BaseModel):
