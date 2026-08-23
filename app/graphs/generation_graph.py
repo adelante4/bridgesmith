@@ -21,6 +21,7 @@ from app.prompts import (
 )
 from app.schemas import (
     ArticleSchema,
+    BrandGuide,
     CompanyProfileSchema,
     GenerateImagePlaceholder,
     GenerateSection,
@@ -82,6 +83,11 @@ def _profile_row_to_schema(row: CompanyProfileRow) -> CompanyProfileSchema:
         tone_signals=row.tone_signals,
         summary=row.summary,
         web_sources=[WebSource(**s) for s in json.loads(row.web_sources)],
+        brand=BrandGuide(
+            primary_color=row.brand_primary_color,
+            accent_color=row.brand_accent_color,
+            font_family=row.brand_font_family,
+        ),
     )
 
 
