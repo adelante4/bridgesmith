@@ -196,14 +196,38 @@ class ResearchPlanSchema(BaseModel):
 class ResearchFact(BaseModel):
     fact: str = Field(description="A single researched fact, cleaned up, not summarized away")
     source_url: Optional[str] = Field(default=None, description="URL the fact was found at, if any")
+    kind: Literal["evidence", "caveat"] = Field(
+        default="evidence",
+        description=(
+            "'evidence' = a positive, usable finding stating something that IS true "
+            "(a number, date, named customer, capability, event). "
+            "'caveat' = a negative or limiting finding — something that could NOT be verified, "
+            "an absence of independent validation, or a scope limit on another fact. "
+            "Anything phrased as 'was not found', 'does not establish', 'is reported rather than "
+            "verified', or 'no public audit exists' is a caveat, never evidence."
+        ),
+    )
 
 
 class CompressedResearchSchema(BaseModel):
     """research node's with_structured_output target — the researcher's final
     structured answer, already in the fact-plus-source shape the outline/writer
-    stages consume directly."""
+    stages consume directly.
+
+    The evidence/caveat split is load-bearing, not cosmetic: only `evidence`
+    facts are ever shown to a writer. Caveats are routed to the critique node
+    alone. Handing a copywriter a majority of "X could not be verified" findings
+    and telling it to write only from those facts is what produced the
+    "Acme-reported ... reported experience ..." hedging — the negations were the
+    raw material. See docs/adr/0006-evidence-caveat-split.md."""
 
     facts: list[ResearchFact] = Field(description="Researched facts about this company, each with its source")
+
+    def evidence(self) -> list[ResearchFact]:
+        return [f for f in self.facts if f.kind == "evidence"]
+
+    def caveats(self) -> list[ResearchFact]:
+        return [f for f in self.facts if f.kind == "caveat"]
 
 
 # ---------------------------------------------------------------------------
@@ -254,17 +278,52 @@ class QuoteCtaDraft(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class CritiqueEdit(BaseModel):
+    """One critique instruction. `severity` exists so the revise loop can act on
+    real defects and ignore taste suggestions — an unfiltered edit list is what
+    let advisory notes ("Consider tightening ...") drive mandatory rewrites."""
+
+    edit: str = Field(description="Concrete, actionable instruction naming the field and the change")
+    severity: Literal["blocking", "advisory"] = Field(
+        description=(
+            "'blocking' = the article is factually wrong, contradicts the research, or is missing a "
+            "required element. 'advisory' = a taste, polish, or emphasis preference. "
+            "Anything whose fix is to add a qualifier, attribution, or disclaimer to an already-"
+            "supported claim is advisory, never blocking."
+        )
+    )
+
+
 class CritiqueSchema(BaseModel):
     """critique node's with_structured_output target — a rubric score plus
-    concrete edits, not a vague verdict."""
+    concrete edits, not a vague verdict.
+
+    `specificity` is deliberately part of the rubric: the original four
+    dimensions all rewarded caution, so the revise loop's fixed point was a
+    maximally-hedged article nobody would read."""
 
     fact_grounding: float = Field(description="0-1: every company claim traces to a researched fact or profile")
     personalization: float = Field(description="0-1: how specifically the article connects sender to receiver")
-    tone_match: float = Field(description="0-1: how well the writing matches the receiver's tone_signals")
+    tone_match: float = Field(description="0-1: how well the writing matches the sender's brand voice")
     structure: float = Field(description="0-1: flow, lead strength, lack of duplication across sections")
-    required_edits: list[str] = Field(
-        default_factory=list, description="Concrete, actionable edits; empty when no revision is needed"
+    specificity: float = Field(
+        description=(
+            "0-1: density of concrete anchors — named companies, numbers, dates, named products or "
+            "customers. Score low when the text relies on abstract nouns and stacked adjectives, "
+            "and low when researched specifics were available but went unused."
+        )
     )
+    required_edits: list[CritiqueEdit] = Field(
+        default_factory=list, description="Concrete edits with severity; empty when no revision is needed"
+    )
+
+    def blocking_edits(self) -> list[str]:
+        return [e.edit for e in self.required_edits if e.severity == "blocking"]
+
+    def min_score(self) -> float:
+        return min(
+            self.fact_grounding, self.personalization, self.tone_match, self.structure, self.specificity
+        )
 
 
 # ---------------------------------------------------------------------------

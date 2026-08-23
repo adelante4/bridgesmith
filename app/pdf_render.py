@@ -15,6 +15,7 @@ import os
 import re
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 from sqlmodel import Session
 from weasyprint import HTML
 
@@ -31,7 +32,13 @@ _env = Environment(
     autoescape=select_autoescape(["html"]),
 )
 
-_FALLBACK_FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+# Every family here must actually exist in the runtime image (see Dockerfile),
+# ending in a real family name rather than the generic keyword. WeasyPrint
+# resolves through fontconfig, and in a slim container with no generic-alias
+# rules installed `sans-serif` itself resolved to Liberation Mono — which is
+# why every brochure rendered in Docker came out monospace regardless of the
+# detected brand font.
+_FALLBACK_FONT_STACK = "'DejaVu Sans', 'Liberation Sans', Arial, Helvetica, sans-serif"
 
 # Brand colors/font are LLM-derived from web content (app/prompts.py) and get
 # interpolated straight into a raw <style> block (brochure_v1.html) — an
@@ -39,7 +46,10 @@ _FALLBACK_FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-seri
 # values that look like what they claim to be; anything else is treated the
 # same as "no signal found" and falls back to the template default.
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-_FONT_NAME_RE = re.compile(r"^[A-Za-z0-9 '\-]{1,60}$")
+# No quote characters: the font stack is emitted into a raw CSS declaration
+# without HTML-escaping (see _css_value), so a name carrying a quote could
+# close the family string and inject further CSS.
+_FONT_NAME_RE = re.compile(r"^[A-Za-z0-9 \-]{1,60}$")
 
 
 def _clean_color(value: str | None) -> str | None:
@@ -61,16 +71,49 @@ def resolve_theme(template_theme: ThemeColors, brand: BrandGuide) -> ThemeColors
 
 
 def _font_stack(font_family: str | None) -> str:
+    """The stack must name the font the way the stylesheet declares it. Google
+    serves 'Space Grotesk'; a stack asking for 'SpaceGrotesk' matches nothing
+    even when the stylesheet loads fine, so use the same display name the
+    @import was built from."""
     if not font_family:
         return _FALLBACK_FONT_STACK
-    return f"'{font_family}', {_FALLBACK_FONT_STACK}"
+    display_name = _google_font_family_param(font_family).replace("+", " ")
+    return f"'{display_name}', {_FALLBACK_FONT_STACK}"
+
+
+_PASCAL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _google_font_family_param(font_family: str) -> str:
+    """Google Fonts wants the display family name ('Space+Grotesk'). What we
+    detect is the PostScript name embedded in the source PDF, which has the
+    spaces stripped ('SpaceGrotesk') and is a 400 from the CSS API — so split
+    PascalCase back apart before asking."""
+    spaced = _PASCAL_BOUNDARY_RE.sub(" ", font_family) if " " not in font_family else font_family
+    return "+".join(spaced.split())
 
 
 def _google_font_url(font_family: str | None) -> str | None:
     if not font_family:
         return None
-    family_param = font_family.replace(" ", "+")
+    family_param = _google_font_family_param(font_family)
     return f"https://fonts.googleapis.com/css2?family={family_param}:wght@400;600;700&display=swap"
+
+
+def _css_value(value: str) -> Markup:
+    """Mark a CSS value as not-to-be-HTML-escaped.
+
+    The template autoescapes (it is a .html file), which is right for the body
+    text but wrong inside <style>: it rewrites the quotes in a font stack to
+    &#39;, making the whole font-family declaration invalid CSS. WeasyPrint then
+    drops the declaration and falls back to its own default family — which is
+    how every brochure ended up in a font nobody chose, regardless of what was
+    detected or which fonts were installed.
+
+    Safe only because every value reaching here has been through _clean_color /
+    _clean_font, which reject anything that isn't a plain hex colour or a
+    quote-free font name."""
+    return Markup(value)
 
 
 def _resolve_asset_path(session: Session, asset_id: int | None) -> str | None:
@@ -104,9 +147,9 @@ def render_brochure_pdf(
         pull_quote=response.pull_quote,
         cta=response.cta,
         images=images,
-        primary_color=theme.primary_color,
-        accent_color=theme.accent_color,
-        font_stack=_font_stack(theme.font_family),
+        primary_color=_css_value(theme.primary_color),
+        accent_color=_css_value(theme.accent_color),
+        font_stack=_css_value(_font_stack(theme.font_family)),
         google_font_url=_google_font_url(theme.font_family),
     )
 
