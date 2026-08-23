@@ -143,6 +143,9 @@ def make_persist_profile_node(session: Session):
             tone_signals=profile.tone_signals,
             summary=profile.summary,
             web_sources=json.dumps([s.model_dump() for s in profile.web_sources]),
+            brand_primary_color=profile.brand.primary_color,
+            brand_accent_color=profile.brand.accent_color,
+            brand_font_family=profile.brand.font_family,
         )
         session.add(profile_row)
         session.commit()
