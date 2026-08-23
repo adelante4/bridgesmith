@@ -1,0 +1,16 @@
+{
+  "template_id": "brochure_v1",
+  "fields": {
+    "headline": {"max_words": 12},
+    "subheadline": {"max_words": 20},
+    "sections": [
+      {"id": "body_intro", "min_words": 40, "max_words": 60, "guidance": "Hook connecting receiver's industry challenge to sender's offering"},
+      {"id": "body_value", "min_words": 80, "max_words": 120, "guidance": "Concrete value proposition, grounded in provided context only"},
+      {"id": "body_proof", "min_words": 40, "max_words": 70, "guidance": "Credibility signal — track record, capability, or differentiator grounded in provided context only"}
+    ],
+    "pull_quote": {"max_words": 25},
+    "cta": {"max_words": 15}
+  },
+  "image_slots": ["hero", "section_1", "section_2"],
+  "theme": {"primary_color": "#101828", "accent_color": "#2563EB", "font_family": "Inter"}
+}
