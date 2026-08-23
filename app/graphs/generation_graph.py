@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any, Literal, TypedDict
 
-from deepagents import create_deep_agent
+from deepagents import FilesystemMiddleware, create_deep_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langfuse import observe
 from sqlmodel import Session, select
@@ -165,12 +165,26 @@ def _context_blob(
     for desc in descriptions:
         parts.append(f"## User-provided description (added {desc.created_at:%Y-%m-%d})\n{desc.text}")
     if research is not None:
+        lines = [
+            f"## Web research (added {research.created_at:%Y-%m-%d})",
+            f"Offerings: {research.offerings}",
+            f"Industry: {research.industry}",
+        ]
+        if research.target_customers:
+            lines.append(f"Target customers: {research.target_customers}")
         pain_points = ", ".join(json.loads(research.pain_points))
-        parts.append(
-            f"## Web research (added {research.created_at:%Y-%m-%d})\n"
-            f"Offerings: {research.offerings}\nIndustry: {research.industry}\n"
-            f"Pain points: {pain_points}\nSummary: {research.summary}"
-        )
+        if pain_points:
+            lines.append(f"Pain points the company faces: {pain_points}")
+        for label, raw in (
+            ("Differentiators", research.differentiators),
+            ("Proof points", research.proof_points),
+            ("Recent developments", research.recent_developments),
+        ):
+            items = json.loads(raw)
+            if items:
+                lines.append(f"{label}: " + "; ".join(items))
+        lines.append(f"Summary: {research.summary}")
+        parts.append("\n".join(lines))
 
     return "\n\n".join(parts) if parts else NO_CONTEXT_PLACEHOLDER
 
@@ -277,18 +291,22 @@ def plan_research_node(state: GenerationState) -> dict:
 
 def _build_researcher():
     web_search_tool = get_web_search_tool(GENERATION_RESEARCH_MODEL_ENV)
+    # Filesystem tools are pure context overhead for a search-and-summarize
+    # agent; read_file is the mandatory minimum (large tool results get
+    # evicted to files the model must be able to read back).
     fact_finder_subagent = {
         "name": "fact-finder",
         "description": "Delegate a focused web search on one or a few related research questions to this sub-agent.",
         "system_prompt": GENERATION_FACT_FINDER_SUBAGENT_PROMPT,
         "tools": [web_search_tool],
+        "middleware": [FilesystemMiddleware(tools=["read_file"])],
     }
     return create_deep_agent(
         model=get_agent_model(GENERATION_RESEARCH_MODEL_ENV),
         tools=[web_search_tool],
         system_prompt=GENERATION_RESEARCH_SYSTEM_PROMPT,
         subagents=[fact_finder_subagent],
-        middleware=[TodoListMiddleware()],
+        middleware=[TodoListMiddleware(), FilesystemMiddleware(tools=["read_file"])],
         response_format=CompressedResearchSchema,
     )
 

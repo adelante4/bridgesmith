@@ -51,18 +51,38 @@ separate sources, not one merged blob, and note that either or both may be absen
 search tool and a company-research-agent sub-agent available.
 
 Plan your work with the todo tool, then delegate deep research on this company to the company-research-agent \
-sub-agent (give it the company name and whatever inputs are present, and ask it to confirm/supplement: current \
-positioning, recent news, industry context not already covered). If neither a PDF digest nor a description was \
-supplied, research the company from its name alone via web search — do not invent document content that was never \
-given to you. Once research is back, verify it against whatever inputs were supplied and produce the final \
-structured result: offerings, industry, pain_points, summary, web_sources — every URL cited during research, with \
-a short note on what it supports. Where web research contradicts a supplied input, prefer the supplied input for \
-claims about the company's own positioning and note the discrepancy in the summary; prefer the web for external \
-facts like recent news. Do not fabricate facts or sources. Writing tone and visual brand identity are gathered \
-elsewhere from the company's own PDFs — not your job here.
+sub-agent (give it the company name and whatever inputs are present, and ask it to confirm/supplement what the \
+final profile needs: current positioning, who the company sells to, what differentiates it from competitors, \
+concrete proof points, recent dated developments, the pressures the company itself faces, and industry context \
+not already covered). If neither a PDF digest nor a description was supplied, research the company from its name \
+alone via web search — do not invent document content that was never given to you.
+
+Budget: at most 10 total search calls across yourself and the sub-agent. Stop early once the profile fields are \
+confidently covered, or once two searches in a row return nothing new — a field honestly marked sparse beats a \
+padded one.
+
+Once research is back, verify it against whatever inputs were supplied and produce the final structured result:
+- offerings: what the company sells.
+- industry: where it operates.
+- target_customers: who it sells to — segments, buyer roles, company sizes/verticals.
+- pain_points: pressures and challenges the company ITSELF currently faces (operational, market, regulatory) — \
+what a vendor selling to them would speak to. NOT the pains its own product solves for its customers.
+- differentiators: what sets it apart from named or implied competitors/alternatives.
+- proof_points: concrete evidence behind its claims — named customers, case studies, metrics, awards. Only ones \
+actually found; leave empty rather than inventing.
+- recent_developments: notable recent events (funding, launches, partnerships, expansion), each with its \
+date/timeframe stated in the item.
+- summary: overall synthesis.
+- web_sources: every URL cited during research, each with a short note on what it supports.
+
+Where web research contradicts a supplied input, prefer the supplied input for claims about the company's own \
+positioning and note the discrepancy in the summary; prefer the web for external facts like recent news. Do not \
+fabricate facts or sources. Writing tone and visual brand identity are gathered elsewhere from the company's own \
+PDFs — not your job here.
 
 Keep going until you have produced that final structured result — delegating to the sub-agent is a step, not the \
-finish line; do not end your turn until every field is populated from real research."""
+finish line; do not end your turn until every field is populated from real research (an explicitly sparse list \
+counts, an invented one does not)."""
 
 DEEP_RESEARCH_USER_PROMPT = """Research and profile this company.
 
@@ -77,10 +97,14 @@ Company name: {name}
 NO_PDF_DIGEST_PLACEHOLDER = "(none — no PDF was uploaded for this run)"
 NO_DESCRIPTION_PLACEHOLDER = "(none — no description was provided for this run)"
 
-COMPANY_RESEARCH_SUBAGENT_PROMPT = """You are a focused company researcher. Given a company digest, use the \
-web_search tool to confirm and supplement it: current positioning, recent news, industry context not present in \
-the digest. Search rather than relying on what you already know — positioning and news go stale. Cite every URL \
-you use. Report back a concise research summary with citations — do not fabricate facts or sources."""
+COMPANY_RESEARCH_SUBAGENT_PROMPT = """You are a focused company researcher. Given a company name and whatever \
+context was supplied, use the web_search tool to confirm and supplement it across: current positioning, target \
+customers (segments, buyer roles), differentiators versus competitors, concrete proof points (named customers, \
+case studies, metrics, awards), recent dated news, pressures the company itself faces, and industry context not \
+already present. Search rather than relying on what you already know — positioning and news go stale. Max 8 \
+searches; stop once the last 2 returned nothing new. Cite every URL you use. Report back a concise research \
+summary with citations, keeping numbers, names, and dates intact — do not fabricate facts or sources, and say \
+plainly which of the above you found nothing on."""
 
 
 # ---------------------------------------------------------------------------

@@ -108,7 +108,28 @@ class ResearchResultSchema(BaseModel):
 
     offerings: str = Field(description="What the company offers/sells")
     industry: str = Field(description="Industry the company operates in")
-    pain_points: list[str] = Field(description="Target pain points this company addresses or has")
+    target_customers: str = Field(
+        default="",
+        description="Who the company sells to: segments, buyer roles, company sizes/verticals",
+    )
+    pain_points: list[str] = Field(
+        description=(
+            "Pain points/pressures the company itself currently faces (operational, market, regulatory) — "
+            "what a vendor selling to them would address; not the pains its own product solves"
+        )
+    )
+    differentiators: list[str] = Field(
+        default_factory=list,
+        description="What sets the company apart from named or implied competitors/alternatives",
+    )
+    proof_points: list[str] = Field(
+        default_factory=list,
+        description="Concrete evidence behind its claims: named customers, case studies, metrics, awards, certifications",
+    )
+    recent_developments: list[str] = Field(
+        default_factory=list,
+        description="Recent notable events (funding, launches, partnerships, expansion), each with its date/timeframe",
+    )
     summary: str = Field(description="Overall summary of the company")
     web_sources: list[WebSource] = Field(
         default_factory=list, description="URLs cited by web search during profiling, for traceability"
@@ -299,7 +320,11 @@ class ResearchRunResponse(BaseModel):
     company_id: str
     offerings: str
     industry: str
+    target_customers: str
     pain_points: list[str]
+    differentiators: list[str]
+    proof_points: list[str]
+    recent_developments: list[str]
     summary: str
     web_sources: list[WebSource]
     created_at: datetime
