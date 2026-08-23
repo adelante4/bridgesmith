@@ -60,6 +60,9 @@ class PdfDigestSchema(BaseModel):
     document_type: str = Field(
         description="Kind of document, e.g. 'company one-pager', 'product brochure'"
     )
+    tone_signals: str = Field(
+        description="Tone/voice signals observed in the document's own writing (formal, playful, technical, etc.)"
+    )
 
 
 class ImageDescription(BaseModel):
@@ -98,20 +101,45 @@ class BrandGuide(BaseModel):
     )
 
 
-class CompanyProfileSchema(BaseModel):
-    """profile_company's with_structured_output target."""
+class ResearchResultSchema(BaseModel):
+    """research_company_profile's with_structured_output target — a deep-research
+    run's findings. No tone/brand fields here: those come from PdfDigest
+    (ingestion agent + vision pass), not from web research."""
 
     offerings: str = Field(description="What the company offers/sells")
     industry: str = Field(description="Industry the company operates in")
     pain_points: list[str] = Field(description="Target pain points this company addresses or has")
-    tone_signals: str = Field(description="Tone/voice signals observed for this company's communications")
     summary: str = Field(description="Overall summary of the company")
     web_sources: list[WebSource] = Field(
         default_factory=list, description="URLs cited by web search during profiling, for traceability"
     )
-    brand: BrandGuide = Field(
-        default_factory=BrandGuide, description="Best-effort brand colors/font gathered during profiling"
+
+
+class PdfBrandSchema(BaseModel):
+    """Vision pass over a PDF's first 1-2 pages — colors + free-text visual
+    style notes only. Font family is cross-checked deterministically from
+    embedded PDF font metadata, not asked of the vision model."""
+
+    primary_color: Optional[str] = Field(
+        default=None, description="Primary brand hex color (e.g. '#0B5FFF') visible on the page, or null if none found"
     )
+    accent_color: Optional[str] = Field(
+        default=None, description="Secondary/accent brand hex color visible on the page, or null if none found"
+    )
+    design_notes: str = Field(
+        default="", description="Short free-text notes on the visual/design style (layout, imagery, mood)"
+    )
+
+
+class StyleBundle(BaseModel):
+    """The company's current writing tone + visual style, deterministically
+    selected from its newest PdfDigest at generate time (see
+    generation_graph.make_load_profiles_node). Null-safe: a company with no
+    PdfDigest yet gets placeholder text and an empty BrandGuide."""
+
+    tone_signals: str
+    design_notes: str
+    brand: BrandGuide = Field(default_factory=BrandGuide)
 
 
 # ---------------------------------------------------------------------------
@@ -264,8 +292,17 @@ class ContextUploadResponse(BaseModel):
     images_extracted: Optional[int] = None
     images_described: Optional[int] = None
     digest_preview: Optional[str] = None
-    profile_summary: str
-    web_sources: list[str]
+    description_added: bool = False
+
+
+class ResearchRunResponse(BaseModel):
+    company_id: str
+    offerings: str
+    industry: str
+    pain_points: list[str]
+    summary: str
+    web_sources: list[WebSource]
+    created_at: datetime
 
 
 class GenerateRequest(BaseModel):
@@ -308,13 +345,3 @@ class GenerateResponse(BaseModel):
     )
 
 
-class CompanyProfileResponse(BaseModel):
-    id: int
-    company_id: str
-    offerings: str
-    industry: str
-    pain_points: list[str]
-    tone_signals: str
-    summary: str
-    web_sources: list[WebSource]
-    created_at: datetime

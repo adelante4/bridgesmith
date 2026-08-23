@@ -26,9 +26,11 @@ from app.llm import (
     get_agent_model,
     get_web_search_tool,
 )
-from app.models import Company
-from app.models import CompanyProfile as CompanyProfileRow
+from app.context_store import all_descriptions, all_pdf_digests, latest_pdf_digest, latest_research
+from app.models import Company, Description
 from app.models import Image
+from app.models import PdfDigest as PdfDigestRow
+from app.models import ResearchRun as ResearchRunRow
 from app.observability import new_trace_config
 from app.prompts import (
     CRITIQUE_SYSTEM_PROMPT,
@@ -52,7 +54,6 @@ from app.schemas import (
     ArticleSchema,
     ArticleOutlineSchema,
     BrandGuide,
-    CompanyProfileSchema,
     CompressedResearchSchema,
     CritiqueSchema,
     GenerateImagePlaceholder,
@@ -61,8 +62,8 @@ from app.schemas import (
     QuoteCtaDraft,
     ResearchPlanSchema,
     SectionTextDraft,
+    StyleBundle,
     TemplateConfig,
-    WebSource,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,12 +87,14 @@ class GenerationState(TypedDict, total=False):
     template: TemplateConfig
     sender_name: str
     receiver_name: str
-    sender_profile: CompanyProfileSchema
-    receiver_profile: CompanyProfileSchema
-    sender_profile_id: int
-    receiver_profile_id: int
-    sender_pdf_digest_id: int
-    receiver_pdf_digest_id: int
+    sender_context_blob: str
+    receiver_context_blob: str
+    sender_style: StyleBundle
+    receiver_style: StyleBundle
+    sender_summary: str
+    receiver_summary: str
+    sender_pdf_digest_id: int | None
+    receiver_pdf_digest_id: int | None
     asset_catalog: dict[str, int]  # alias (e.g. "A2") -> Image.id
     sender_assets_block: str
     research_plan: ResearchPlanSchema
@@ -125,54 +128,92 @@ def _word_truncate(text: str, max_words: int) -> str:
     return " ".join(text.split()[:max_words])
 
 
-def _profile_row_to_schema(row: CompanyProfileRow) -> CompanyProfileSchema:
-    return CompanyProfileSchema(
-        offerings=row.offerings,
-        industry=row.industry,
-        pain_points=json.loads(row.pain_points),
-        tone_signals=row.tone_signals,
-        summary=row.summary,
-        web_sources=[WebSource(**s) for s in json.loads(row.web_sources)],
+NO_CONTEXT_PLACEHOLDER = "(no context available for this company yet — no PDFs, descriptions, or research on file)"
+NO_RESEARCH_SUMMARY_PLACEHOLDER = "(no web research run yet for this company — see the context above for what's on file)"
+
+
+def _style_bundle(digest: PdfDigestRow | None) -> StyleBundle:
+    """Deterministic selection, no LLM call: the company's newest PdfDigest
+    already carries tone_signals (ingestion agent, text-based) and
+    design_notes/brand colors (vision pass over pages 1-2). A company with no
+    PdfDigest yet gets placeholder tone text and an empty BrandGuide — no
+    fallback search through older digests (there are none to prefer over)."""
+    if digest is None:
+        return StyleBundle(tone_signals="(unknown — no PDF uploaded for this company yet)", design_notes="")
+    return StyleBundle(
+        tone_signals=digest.tone_signals or "(unknown)",
+        design_notes=digest.design_notes,
         brand=BrandGuide(
-            primary_color=row.brand_primary_color,
-            accent_color=row.brand_accent_color,
-            font_family=row.brand_font_family,
+            primary_color=digest.brand_primary_color,
+            accent_color=digest.brand_accent_color,
+            font_family=digest.brand_font_family,
         ),
     )
 
 
-def _latest_profile(session: Session, company_id: str) -> CompanyProfileRow | None:
-    return session.exec(
-        select(CompanyProfileRow)
-        .where(CompanyProfileRow.company_id == company_id)
-        .order_by(CompanyProfileRow.id.desc())
-    ).first()
+def _context_blob(
+    digests: list[PdfDigestRow], descriptions: list[Description], research: ResearchRunRow | None
+) -> str:
+    """Plain concatenation of every context source on file for this company —
+    no LLM synthesis. All PdfDigests and Descriptions ever added, plus the
+    single newest ResearchRun (see docs/adr/0005-decouple-context-from-research.md)."""
+    parts: list[str] = []
+    for d in digests:
+        parts.append(
+            f"## PDF context ({d.document_type or 'document'}, added {d.created_at:%Y-%m-%d})\n{d.digest_text}"
+        )
+    for desc in descriptions:
+        parts.append(f"## User-provided description (added {desc.created_at:%Y-%m-%d})\n{desc.text}")
+    if research is not None:
+        pain_points = ", ".join(json.loads(research.pain_points))
+        parts.append(
+            f"## Web research (added {research.created_at:%Y-%m-%d})\n"
+            f"Offerings: {research.offerings}\nIndustry: {research.industry}\n"
+            f"Pain points: {pain_points}\nSummary: {research.summary}"
+        )
+
+    return "\n\n".join(parts) if parts else NO_CONTEXT_PLACEHOLDER
+
+
+def _load_company_context(session: Session, company_id: str):
+    """Fetches each of the three context logs for one company exactly once,
+    then derives the blob/style/summary from that single fetch (fixes the
+    earlier version's duplicate per-field queries)."""
+    digest = latest_pdf_digest(session, company_id)
+    research = latest_research(session, company_id)
+    digests = all_pdf_digests(session, company_id)
+    descriptions = all_descriptions(session, company_id)
+
+    return {
+        "digest": digest,
+        "blob": _context_blob(digests, descriptions, research),
+        "style": _style_bundle(digest),
+        "summary": research.summary if research else NO_RESEARCH_SUMMARY_PLACEHOLDER,
+    }
 
 
 def make_load_profiles_node(session: Session):
     @observe(name="load_profiles", capture_input=False, capture_output=False)
     def load_profiles_node(state: GenerationState) -> dict:
-        sender_row = _latest_profile(session, state["sender_id"])
-        if sender_row is None:
+        sender_company = session.get(Company, state["sender_id"])
+        if sender_company is None:
             raise CompanyNotFoundError(state["sender_id"], "sender")
-        receiver_row = _latest_profile(session, state["receiver_id"])
-        if receiver_row is None:
+        receiver_company = session.get(Company, state["receiver_id"])
+        if receiver_company is None:
             raise CompanyNotFoundError(state["receiver_id"], "receiver")
 
-        sender_company = session.get(Company, state["sender_id"])
-        receiver_company = session.get(Company, state["receiver_id"])
+        sender_ctx = _load_company_context(session, state["sender_id"])
+        receiver_ctx = _load_company_context(session, state["receiver_id"])
+        sender_digest = sender_ctx["digest"]
 
-        # Sender-only asset catalog, scoped to the sender's latest ingestion run
-        # (matching the CompanyProfile just loaded — see docs/adr/0001-...).
+        # Sender-only asset catalog, scoped to the sender's newest PdfDigest.
         # Every Image row was described at ingestion time, so the catalog only
         # ever contains assets the draft model can reason about.
         sender_images: list[Image] = []
-        if sender_row.pdf_digest_id is not None:
+        if sender_digest is not None:
             sender_images = list(
                 session.exec(
-                    select(Image)
-                    .where(Image.pdf_digest_id == sender_row.pdf_digest_id)
-                    .order_by(Image.id)
+                    select(Image).where(Image.pdf_digest_id == sender_digest.id).order_by(Image.id)
                 ).all()
             )
 
@@ -186,14 +227,16 @@ def make_load_profiles_node(session: Session):
             sender_assets_block = NO_ASSETS_PLACEHOLDER
 
         return {
-            "sender_name": (sender_company.name if sender_company else None) or state["sender_id"],
-            "receiver_name": (receiver_company.name if receiver_company else None) or state["receiver_id"],
-            "sender_profile": _profile_row_to_schema(sender_row),
-            "receiver_profile": _profile_row_to_schema(receiver_row),
-            "sender_profile_id": sender_row.id,
-            "receiver_profile_id": receiver_row.id,
-            "sender_pdf_digest_id": sender_row.pdf_digest_id,
-            "receiver_pdf_digest_id": receiver_row.pdf_digest_id,
+            "sender_name": sender_company.name or state["sender_id"],
+            "receiver_name": receiver_company.name or state["receiver_id"],
+            "sender_context_blob": sender_ctx["blob"],
+            "receiver_context_blob": receiver_ctx["blob"],
+            "sender_style": sender_ctx["style"],
+            "receiver_style": receiver_ctx["style"],
+            "sender_summary": sender_ctx["summary"],
+            "receiver_summary": receiver_ctx["summary"],
+            "sender_pdf_digest_id": sender_digest.id if sender_digest else None,
+            "receiver_pdf_digest_id": receiver_ctx["digest"].id if receiver_ctx["digest"] else None,
             "asset_catalog": asset_catalog,
             "sender_assets_block": sender_assets_block,
         }
@@ -213,8 +256,8 @@ def plan_research_node(state: GenerationState) -> dict:
     prompt = RESEARCH_PLAN_USER_PROMPT.format(
         sender_name=state["sender_name"],
         receiver_name=state["receiver_name"],
-        sender_profile=state["sender_profile"].model_dump_json(exclude={"web_sources"}),
-        receiver_profile=state["receiver_profile"].model_dump_json(exclude={"web_sources"}),
+        sender_profile=state["sender_context_blob"],
+        receiver_profile=state["receiver_context_blob"],
         user_prompt=state["prompt"],
     )
     plan = model.invoke(
@@ -264,8 +307,8 @@ def research_node(state: GenerationState) -> dict:
     prompt = GENERATION_RESEARCH_USER_PROMPT.format(
         sender_name=state["sender_name"],
         receiver_name=state["receiver_name"],
-        sender_profile=state["sender_profile"].model_dump_json(exclude={"web_sources"}),
-        receiver_profile=state["receiver_profile"].model_dump_json(exclude={"web_sources"}),
+        sender_profile=state["sender_context_blob"],
+        receiver_profile=state["receiver_context_blob"],
         questions=_questions_block(state["research_plan"]),
     )
     result = agent.invoke({"messages": [{"role": "user", "content": prompt}]}, config=new_trace_config())
@@ -305,8 +348,8 @@ def outline_node(state: GenerationState) -> dict:
 
     model = get_agent_model(GENERATION_MODEL_ENV).with_structured_output(ArticleOutlineSchema)
     prompt = OUTLINE_USER_PROMPT.format(
-        sender_profile=state["sender_profile"].model_dump_json(exclude={"web_sources"}),
-        receiver_profile=state["receiver_profile"].model_dump_json(exclude={"web_sources"}),
+        sender_profile=state["sender_context_blob"],
+        receiver_profile=state["receiver_context_blob"],
         research=_facts_block(state["research"]),
         user_prompt=state["prompt"],
         template_constraints="\n".join(lines),
@@ -335,9 +378,9 @@ def _write_unit(unit_label: str, word_limit: int, guidance: str, angle: str, fac
         guidance=guidance,
         angle=angle,
         facts="\n".join(f"- {f}" for f in fact_refs) if fact_refs else "(none assigned — write from the profiles only)",
-        sender_summary=state["sender_profile"].summary,
-        receiver_summary=state["receiver_profile"].summary,
-        receiver_tone=state["receiver_profile"].tone_signals,
+        sender_summary=state["sender_summary"],
+        receiver_summary=state["receiver_summary"],
+        receiver_tone=state["receiver_style"].tone_signals,
     )
     result = model.invoke(
         [
@@ -364,9 +407,9 @@ def draft_sections_node(state: GenerationState) -> dict:
         guidance="Headline + subheadline together introduce the article's hook.",
         angle=f"Headline angle: {outline.headline_angle}\nSubheadline angle: {outline.subheadline_angle}",
         facts="(headline/subheadline draw on the article's overall angle, not a specific fact list)",
-        sender_summary=state["sender_profile"].summary,
-        receiver_summary=state["receiver_profile"].summary,
-        receiver_tone=state["receiver_profile"].tone_signals,
+        sender_summary=state["sender_summary"],
+        receiver_summary=state["receiver_summary"],
+        receiver_tone=state["receiver_style"].tone_signals,
     )
     headline_subheadline = hs_model.invoke(
         [
@@ -396,9 +439,9 @@ def draft_sections_node(state: GenerationState) -> dict:
         guidance="Pull quote is a short standalone highlight; CTA drives the reader to act.",
         angle=f"Pull quote angle: {outline.pull_quote_angle}\nCTA angle: {outline.cta_angle}",
         facts="(draw on the drafted sections' claims, not new facts)",
-        sender_summary=state["sender_profile"].summary,
-        receiver_summary=state["receiver_profile"].summary,
-        receiver_tone=state["receiver_profile"].tone_signals,
+        sender_summary=state["sender_summary"],
+        receiver_summary=state["receiver_summary"],
+        receiver_tone=state["receiver_style"].tone_signals,
     )
     quote_cta = qc_model.invoke(
         [

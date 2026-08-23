@@ -18,8 +18,13 @@ from PIL import Image as PILImage
 
 from app.llm import VISION_MODEL_ENV, get_agent_model
 from app.observability import new_trace_config
-from app.prompts import VISION_SUBAGENT_SYSTEM_PROMPT, VISION_SUBAGENT_USER_PROMPT
-from app.schemas import ImageDescription
+from app.prompts import (
+    BRAND_VISION_SYSTEM_PROMPT,
+    BRAND_VISION_USER_PROMPT,
+    VISION_SUBAGENT_SYSTEM_PROMPT,
+    VISION_SUBAGENT_USER_PROMPT,
+)
+from app.schemas import ImageDescription, PdfBrandSchema
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +79,27 @@ def describe_image_subagent(
 
     result = model.invoke([system_message, user_message], config=config or new_trace_config())
     return result
+
+
+def extract_brand_from_pages(page_images: list[bytes], config: RunnableConfig | None = None) -> PdfBrandSchema:
+    """Vision call over rendered PDF page PNGs (app.pdf_extraction.render_first_pages)
+    -> primary/accent brand colors + free-text design notes. Font family is not
+    asked here — it's cross-checked deterministically from PDF metadata instead
+    (app.pdf_extraction.detect_embedded_font)."""
+    if not page_images:
+        return PdfBrandSchema()
+
+    model = get_agent_model(VISION_MODEL_ENV, temperature=0).with_structured_output(PdfBrandSchema)
+
+    system_message = {"role": "system", "content": BRAND_VISION_SYSTEM_PROMPT}
+    content = [
+        {"type": "image", "source_type": "base64", "data": base64.b64encode(img).decode("utf-8"), "mime_type": "image/png"}
+        for img in page_images
+    ]
+    content.append({"type": "text", "text": BRAND_VISION_USER_PROMPT.format(page_count=len(page_images))})
+    user_message = {"role": "user", "content": content}
+
+    return model.invoke([system_message, user_message], config=config or new_trace_config())
 
 
 def format_description_for_tool_result(description: ImageDescription) -> str:

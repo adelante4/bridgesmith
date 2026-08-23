@@ -49,7 +49,7 @@ def generate_article(request: GenerateRequest, session: Session = Depends(get_se
 
     pdf_supported = template.template_id in PDF_ENABLED_TEMPLATE_IDS
     theme = (
-        resolve_theme(template.theme, final_state["sender_profile"].brand) if pdf_supported else template.theme
+        resolve_theme(template.theme, final_state["sender_style"].brand) if pdf_supported else template.theme
     )
 
     response = GenerateResponse(
@@ -68,8 +68,8 @@ def generate_article(request: GenerateRequest, session: Session = Depends(get_se
     article = GeneratedArticle(
         sender_id=request.sender_id,
         receiver_id=request.receiver_id,
-        sender_profile_id=final_state["sender_profile_id"],
-        receiver_profile_id=final_state["receiver_profile_id"],
+        sender_pdf_digest_id=final_state["sender_pdf_digest_id"],
+        receiver_pdf_digest_id=final_state["receiver_pdf_digest_id"],
         prompt=request.prompt,
         template_id=template.template_id,
         result_json=response.model_dump_json(),
