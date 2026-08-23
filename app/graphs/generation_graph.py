@@ -648,7 +648,7 @@ def validate_node(state: GenerationState) -> dict:
 
 
 def should_repair(state: GenerationState) -> Literal["repair", "finalize_article"]:
-    if state["validation_errors"] and state["repair_attempts"] < MAX_REPAIR_ATTEMPTS:
+    if state["validation_errors"] and state.get("repair_attempts", 0) < MAX_REPAIR_ATTEMPTS:
         return "repair"
     return "finalize_article"
 
@@ -688,7 +688,7 @@ def repair_node(state: GenerationState) -> dict:
     return {
         "draft": draft,
         "draft_messages": messages + [raw],
-        "repair_attempts": state["repair_attempts"] + 1,
+        "repair_attempts": state.get("repair_attempts", 0) + 1,
     }
 
 
