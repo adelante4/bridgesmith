@@ -83,6 +83,9 @@ class CompanyProfile(SQLModel, table=True):
     tone_signals: str
     summary: str
     web_sources: str = Field(default="[]", description="JSON list of {url, note}")
+    brand_primary_color: str | None = Field(default=None)
+    brand_accent_color: str | None = Field(default=None)
+    brand_font_family: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -95,4 +98,5 @@ class GeneratedArticle(SQLModel, table=True):
     prompt: str
     template_id: str
     result_json: str
+    pdf_path: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)

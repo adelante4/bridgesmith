@@ -54,10 +54,14 @@ sub-agent (give it the company name and whatever inputs are present, and ask it 
 positioning, recent news, industry context not already covered). If neither a PDF digest nor a description was \
 supplied, research the company from its name alone via web search — do not invent document content that was never \
 given to you. Once research is back, verify it against whatever inputs were supplied and produce the final \
-structured company profile: offerings, industry, pain_points, tone_signals, summary, and web_sources — every URL \
-cited during research, with a short note on what it supports. Where web research contradicts a supplied input, \
-prefer the supplied input for claims about the company's own positioning and note the discrepancy in the summary; \
-prefer the web for external facts like recent news. Do not fabricate facts or sources.
+structured company profile: offerings, industry, pain_points, tone_signals, summary, web_sources — every URL \
+cited during research, with a short note on what it supports — and brand: the company's primary/accent brand \
+colors and font family, if you can identify them from the company's own site, press kit, or visible brand \
+elements in the supplied context (e.g. a logo image). Leave any brand field null rather than guessing — a plain \
+company site with no distinct visual identity, or a source that gives you nothing to go on, means null, not an \
+invented color or font. Where web research contradicts a supplied input, prefer the supplied input for claims \
+about the company's own positioning and note the discrepancy in the summary; prefer the web for external facts \
+like recent news. Do not fabricate facts or sources.
 
 Keep going until you have produced that final structured profile — delegating to the sub-agent is a step, not the \
 finish line; do not end your turn until every field is populated from real research."""
@@ -77,8 +81,11 @@ NO_DESCRIPTION_PLACEHOLDER = "(none — no description was provided for this run
 
 COMPANY_RESEARCH_SUBAGENT_PROMPT = """You are a focused company researcher. Given a company digest, use the \
 web_search tool to confirm and supplement it: current positioning, recent news, industry context not present in \
-the digest. Search rather than relying on what you already know — positioning and news go stale. Cite every URL \
-you use. Report back a concise research summary with citations — do not fabricate facts or sources."""
+the digest. Search rather than relying on what you already know — positioning and news go stale. While you're on \
+the company's own site, also note any clear brand signals you notice — a primary/accent color scheme or a \
+distinctive font/typeface used in their branding — but don't go out of your way hunting for these; report "no \
+clear brand signal" rather than guessing if the site doesn't make it obvious. Cite every URL you use. Report back \
+a concise research summary with citations — do not fabricate facts or sources."""
 
 
 GENERATE_DRAFT_SYSTEM_PROMPT = """You are writing a tailored B2B marketing article that bridges a Sender company \

@@ -33,6 +33,9 @@ class FieldConstraints(BaseModel):
 class ThemeColors(BaseModel):
     primary_color: str
     accent_color: str
+    font_family: Optional[str] = Field(
+        default=None, description="Font family name, e.g. 'Poppins'; null falls back to a system sans-serif stack"
+    )
 
 
 class TemplateConfig(BaseModel):
@@ -79,6 +82,22 @@ class WebSource(BaseModel):
     note: str = Field(description="Short note on what this source supports/confirms")
 
 
+class BrandGuide(BaseModel):
+    """Best-effort brand signals gathered alongside the company profile. Any
+    field may be null when no clear signal was found — callers must fall back
+    to a template's own defaults rather than treat a null as an error."""
+
+    primary_color: Optional[str] = Field(
+        default=None, description="Company's primary brand hex color (e.g. '#0B5FFF'), or null if none found"
+    )
+    accent_color: Optional[str] = Field(
+        default=None, description="Company's secondary/accent brand hex color, or null if none found"
+    )
+    font_family: Optional[str] = Field(
+        default=None, description="Company's brand font family name (e.g. 'Poppins'), or null if none found"
+    )
+
+
 class CompanyProfileSchema(BaseModel):
     """profile_company's with_structured_output target."""
 
@@ -89,6 +108,9 @@ class CompanyProfileSchema(BaseModel):
     summary: str = Field(description="Overall summary of the company")
     web_sources: list[WebSource] = Field(
         default_factory=list, description="URLs cited by web search during profiling, for traceability"
+    )
+    brand: BrandGuide = Field(
+        default_factory=BrandGuide, description="Best-effort brand colors/font gathered during profiling"
     )
 
 
@@ -241,7 +263,7 @@ class GenerateRequest(BaseModel):
     sender_id: str
     receiver_id: str
     prompt: str
-    template_id: str = "b2b_newsletter_v1"
+    template_id: str = "brochure_v1"
 
 
 class GenerateSection(BaseModel):
@@ -271,6 +293,10 @@ class GenerateResponse(BaseModel):
     theme: ThemeColors
     grounding_notes: str
     sources: list[str] = Field(default_factory=list)
+    pdf_path: Optional[str] = Field(
+        default=None,
+        description="Path to a rendered PDF, when the template supports PDF rendering (brochure_v1 only)",
+    )
 
 
 class CompanyProfileResponse(BaseModel):
