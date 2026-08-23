@@ -24,6 +24,10 @@ _NEW_COLUMNS = [
     ("pdfdigest", "brand_font_family", "VARCHAR"),
     ("generatedarticle", "sender_pdf_digest_id", "INTEGER"),
     ("generatedarticle", "receiver_pdf_digest_id", "INTEGER"),
+    ("researchrun", "target_customers", "VARCHAR DEFAULT ''"),
+    ("researchrun", "differentiators", "TEXT DEFAULT '[]'"),
+    ("researchrun", "proof_points", "TEXT DEFAULT '[]'"),
+    ("researchrun", "recent_developments", "TEXT DEFAULT '[]'"),
 ]
 
 

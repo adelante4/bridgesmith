@@ -96,7 +96,11 @@ class ResearchRun(SQLModel, table=True):
     company_id: str = Field(foreign_key="company.id")
     offerings: str
     industry: str
-    pain_points: str = Field(default="[]", description="JSON list")
+    target_customers: str = Field(default="", description="Segments/buyer roles the company sells to")
+    pain_points: str = Field(default="[]", description="JSON list — pains the company itself faces")
+    differentiators: str = Field(default="[]", description="JSON list")
+    proof_points: str = Field(default="[]", description="JSON list")
+    recent_developments: str = Field(default="[]", description="JSON list, each item dated")
     summary: str
     web_sources: str = Field(default="[]", description="JSON list of {url, note}")
     created_at: datetime = Field(default_factory=_utcnow)

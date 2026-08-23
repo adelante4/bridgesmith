@@ -16,7 +16,7 @@ providers; get_web_search_tool raises for those (spec.md §7).
 
 import logging
 
-from deepagents import create_deep_agent
+from deepagents import FilesystemMiddleware, create_deep_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain_core.runnables import RunnableConfig
 
@@ -36,18 +36,23 @@ logger = logging.getLogger(__name__)
 
 def _build_agent():
     web_search_tool = get_web_search_tool(DEEP_RESEARCH_MODEL_ENV)
+    # Filesystem tools are pure context overhead for a search-and-summarize
+    # agent; read_file is the mandatory minimum (large tool results get
+    # evicted to files the model must be able to read back).
+    minimal_fs = FilesystemMiddleware(tools=["read_file"])
     company_research_subagent = {
         "name": "company-research-agent",
         "description": "Delegate deep research on a single company to this sub-agent. Give it one company at a time.",
         "system_prompt": COMPANY_RESEARCH_SUBAGENT_PROMPT,
         "tools": [web_search_tool],
+        "middleware": [FilesystemMiddleware(tools=["read_file"])],
     }
     return create_deep_agent(
         model=get_agent_model(DEEP_RESEARCH_MODEL_ENV),
         tools=[web_search_tool],
         system_prompt=DEEP_RESEARCH_SYSTEM_PROMPT,
         subagents=[company_research_subagent],
-        middleware=[TodoListMiddleware()],
+        middleware=[TodoListMiddleware(), minimal_fs],
         response_format=ResearchResultSchema,
     )
 
