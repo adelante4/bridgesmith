@@ -50,11 +50,19 @@ def render_research(run: ResearchRun) -> None:
     st.markdown(f"**Summary:** {run.summary}")
     st.markdown(f"**Industry:** {run.industry}")
     st.markdown(f"**Offerings:** {run.offerings}")
-    pain_points = _json_list(run.pain_points)
-    if pain_points:
-        st.markdown("**Pain points:**")
-        for point in pain_points:
-            st.markdown(f"- {point}")
+    if run.target_customers:
+        st.markdown(f"**Target customers:** {run.target_customers}")
+    for label, raw in (
+        ("Pain points (company faces)", run.pain_points),
+        ("Differentiators", run.differentiators),
+        ("Proof points", run.proof_points),
+        ("Recent developments", run.recent_developments),
+    ):
+        items = _json_list(raw)
+        if items:
+            st.markdown(f"**{label}:**")
+            for item in items:
+                st.markdown(f"- {item}")
     web_sources = _json_list(run.web_sources)
     if web_sources:
         st.markdown("**Web sources:**")
