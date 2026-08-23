@@ -117,7 +117,7 @@ def run_research(company_id: str, session: Session = Depends(get_session)) -> Re
             digest_text=latest_digest.digest_text,
             key_facts=json.loads(latest_digest.key_facts),
             document_type=latest_digest.document_type,
-            tone_signals=latest_digest.tone_signals,
+            tone_signals=latest_digest.tone_signals or "",
         )
 
     descriptions = all_descriptions(session, company_id)
