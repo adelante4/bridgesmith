@@ -1,6 +1,11 @@
-"""Streamlit backoffice — browse companies and their stored artifacts (profiles,
-PDF digests, images, generated articles) straight from the SQLite DB, and drive
-the FastAPI endpoints (/context upload, /generate) from a simple UI.
+"""Streamlit backoffice — browse companies and their stored context (PDF
+digests, descriptions, research runs, images, generated articles) straight
+from the SQLite DB, and drive the FastAPI endpoints (/context, /context/{id}
+/research, /generate) from a simple UI.
+
+Context accumulates as three independent append-only logs — PdfDigest,
+Description, ResearchRun — with no synthesized "profile" row; /generate reads
+all three directly at generation time (docs/adr/0005-decouple-context-from-research.md).
 
 Run: streamlit run backoffice/app.py
 Env: DATA_DIR (default "data"), API_URL (default "http://localhost:8000").
@@ -15,7 +20,7 @@ import streamlit as st
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import Company, CompanyProfile, GeneratedArticle, Image, PdfDigest
+from app.models import Company, Description, GeneratedArticle, Image, PdfDigest, ResearchRun
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
@@ -27,11 +32,9 @@ def load_companies() -> list[Company]:
         return list(session.exec(select(Company).order_by(Company.created_at)))
 
 
-def latest_profile(session: Session, company_id: str) -> CompanyProfile | None:
+def latest_research(session: Session, company_id: str) -> ResearchRun | None:
     return session.exec(
-        select(CompanyProfile)
-        .where(CompanyProfile.company_id == company_id)
-        .order_by(CompanyProfile.id.desc())
+        select(ResearchRun).where(ResearchRun.company_id == company_id).order_by(ResearchRun.id.desc())
     ).first()
 
 
@@ -43,19 +46,16 @@ def _json_list(raw: str) -> list:
         return []
 
 
-def render_profile(profile: CompanyProfile) -> None:
-    st.markdown(f"**Summary:** {profile.summary}")
-    st.markdown(f"**Industry:** {profile.industry}")
-    st.markdown(f"**Offerings:** {profile.offerings}")
-    st.markdown(f"**Tone signals:** {profile.tone_signals}")
-    if profile.description:
-        st.markdown(f"**User description:** {profile.description}")
-    pain_points = _json_list(profile.pain_points)
+def render_research(run: ResearchRun) -> None:
+    st.markdown(f"**Summary:** {run.summary}")
+    st.markdown(f"**Industry:** {run.industry}")
+    st.markdown(f"**Offerings:** {run.offerings}")
+    pain_points = _json_list(run.pain_points)
     if pain_points:
         st.markdown("**Pain points:**")
         for point in pain_points:
             st.markdown(f"- {point}")
-    web_sources = _json_list(profile.web_sources)
+    web_sources = _json_list(run.web_sources)
     if web_sources:
         st.markdown("**Web sources:**")
         for source in web_sources:
@@ -63,7 +63,7 @@ def render_profile(profile: CompanyProfile) -> None:
                 st.markdown(f"- [{source.get('url', '')}]({source.get('url', '')}) — {source.get('note', '')}")
             else:
                 st.markdown(f"- {source}")
-    st.caption(f"Profile v{profile.id} · created {profile.created_at:%Y-%m-%d %H:%M} UTC")
+    st.caption(f"Research run #{run.id} · {run.created_at:%Y-%m-%d %H:%M} UTC")
 
 
 def render_article(article: GeneratedArticle) -> None:
@@ -119,21 +119,21 @@ if page == "Companies":
     with Session(engine) as session:
         overview = []
         for company in companies:
-            profile = latest_profile(session, company.id)
+            research = latest_research(session, company.id)
             digests = session.exec(
                 select(PdfDigest).where(PdfDigest.company_id == company.id)
             ).all()
-            profile_versions = session.exec(
-                select(CompanyProfile).where(CompanyProfile.company_id == company.id)
+            descriptions = session.exec(
+                select(Description).where(Description.company_id == company.id)
             ).all()
             overview.append(
                 {
                     "id": company.id,
                     "name": company.name,
                     "created": company.created_at.strftime("%Y-%m-%d %H:%M"),
-                    "profile versions": len(profile_versions),
                     "pdf uploads": len(digests),
-                    "industry": profile.industry if profile else "",
+                    "descriptions": len(descriptions),
+                    "industry": research.industry if research else "",
                 }
             )
     st.dataframe(overview, use_container_width=True, hide_index=True)
@@ -143,50 +143,74 @@ if page == "Companies":
     )
     if selected:
         with Session(engine) as session:
-            profiles = session.exec(
-                select(CompanyProfile)
-                .where(CompanyProfile.company_id == selected)
-                .order_by(CompanyProfile.id.desc())
+            research_runs = session.exec(
+                select(ResearchRun)
+                .where(ResearchRun.company_id == selected)
+                .order_by(ResearchRun.id.desc())
             ).all()
             digests = session.exec(
                 select(PdfDigest)
                 .where(PdfDigest.company_id == selected)
                 .order_by(PdfDigest.id.desc())
             ).all()
+            descriptions = session.exec(
+                select(Description)
+                .where(Description.company_id == selected)
+                .order_by(Description.id.desc())
+            ).all()
             images = session.exec(select(Image).where(Image.company_id == selected)).all()
 
-        tab_profile, tab_digests, tab_images = st.tabs(
-            [f"Profiles ({len(profiles)})", f"PDF digests ({len(digests)})", f"Images ({len(images)})"]
+        tab_research, tab_digests, tab_descriptions, tab_images = st.tabs(
+            [
+                f"Research ({len(research_runs)})",
+                f"PDF digests ({len(digests)})",
+                f"Descriptions ({len(descriptions)})",
+                f"Images ({len(images)})",
+            ]
         )
 
-        with tab_profile:
-            if not profiles:
-                st.info("No profile stored.")
-            for i, profile in enumerate(profiles):
-                header = f"v{profile.id}" + (" (latest — used by /generate)" if i == 0 else "")
+        with tab_research:
+            if not research_runs:
+                st.info("No research run yet — use the 'Run deep research' button on the Upload context page.")
+            for i, run in enumerate(research_runs):
+                header = f"run #{run.id}" + (" (latest — used by /generate)" if i == 0 else "")
                 with st.expander(header, expanded=(i == 0)):
-                    render_profile(profile)
+                    render_research(run)
 
         with tab_digests:
             if not digests:
                 st.info("No PDF uploads.")
-            for digest in digests:
-                with st.expander(
+            for i, digest in enumerate(digests):
+                header = (
                     f"Digest #{digest.id} · {digest.document_type or 'unknown type'} · "
                     f"{digest.created_at:%Y-%m-%d %H:%M}"
-                ):
+                ) + (" (latest — used by /generate)" if i == 0 else "")
+                with st.expander(header):
                     st.markdown(digest.digest_text or "_empty_")
                     key_facts = _json_list(digest.key_facts)
                     if key_facts:
                         st.markdown("**Key facts:**")
                         for fact in key_facts:
                             st.markdown(f"- {fact}")
+                    st.markdown(f"**Tone signals:** {digest.tone_signals or '_none_'}")
+                    st.markdown(f"**Design notes:** {digest.design_notes or '_none_'}")
+                    st.markdown(
+                        f"**Brand:** primary `{digest.brand_primary_color or '—'}` · "
+                        f"accent `{digest.brand_accent_color or '—'}` · font `{digest.brand_font_family or '—'}`"
+                    )
                     st.caption(
                         f"{digest.images_reviewed} images reviewed"
                         + (" (cap hit)" if digest.images_cap_hit else "")
                     )
                     with st.expander("Raw transcript"):
                         st.text(digest.raw_text)
+
+        with tab_descriptions:
+            if not descriptions:
+                st.info("No descriptions added.")
+            for desc in descriptions:
+                with st.expander(f"Description #{desc.id} · {desc.created_at:%Y-%m-%d %H:%M}"):
+                    st.markdown(desc.text)
 
         with tab_images:
             if not images:
@@ -262,6 +286,10 @@ elif page == "Generate":
 
 elif page == "Upload context":
     st.title("Upload company context")
+    st.caption(
+        "Adding a PDF or description never triggers web research on its own — "
+        "run that separately below once you have whatever context you want."
+    )
     existing = st.selectbox(
         "Company (leave as 'New company' to create one)",
         ["New company"] + [c.id for c in companies],
@@ -272,14 +300,14 @@ elif page == "Upload context":
     description = st.text_area("Description (required when no PDF)")
     file = st.file_uploader("Company PDF", type=["pdf"])
 
-    if st.button("Ingest", type="primary", disabled=not name or (not file and not description)):
+    if st.button("Add context", type="primary", disabled=not name or (not file and not description)):
         data = {"name": name}
         if existing != "New company":
             data["company_id"] = existing
         if description:
             data["description"] = description
         files = {"file": (file.name, file.getvalue(), "application/pdf")} if file else None
-        with st.spinner("Ingesting — PDF extraction, vision review, and profiling can take a few minutes…"):
+        with st.spinner("Ingesting — PDF extraction and vision review can take a few minutes…"):
             try:
                 response = requests.post(f"{API_URL}/context", data=data, files=files, timeout=1800)
             except requests.ConnectionError:
@@ -287,8 +315,7 @@ elif page == "Upload context":
                 st.stop()
         if response.ok:
             result = response.json()
-            st.success(f"Ingested — company_id `{result['company_id']}`")
-            st.markdown(f"**Profile summary:** {result['profile_summary']}")
+            st.success(f"Context added — company_id `{result['company_id']}`")
             if result.get("digest_preview"):
                 st.markdown(f"**Digest preview:** {result['digest_preview']}")
             with st.expander("Raw response"):
@@ -299,6 +326,35 @@ elif page == "Upload context":
             except json.JSONDecodeError:
                 detail = response.text
             st.error(f"API error {response.status_code}: {detail}")
+
+    st.divider()
+    st.subheader("Run deep research")
+    st.caption("Separately triggers a web-search research run for an existing company.")
+    if companies:
+        research_target = st.selectbox(
+            "Company", [c.id for c in companies], format_func=company_labels.get, key="research_target"
+        )
+        if st.button("Run deep research", type="secondary"):
+            with st.spinner("Researching — this calls the web-search agent and can take a minute…"):
+                try:
+                    response = requests.post(f"{API_URL}/context/{research_target}/research", timeout=600)
+                except requests.ConnectionError:
+                    st.error(f"Cannot reach API at {API_URL} — is the FastAPI server running?")
+                    st.stop()
+            if response.ok:
+                result = response.json()
+                st.success("Research complete")
+                st.markdown(f"**Summary:** {result['summary']}")
+                with st.expander("Raw response"):
+                    st.json(result)
+            else:
+                try:
+                    detail = response.json().get("detail", response.text)
+                except json.JSONDecodeError:
+                    detail = response.text
+                st.error(f"API error {response.status_code}: {detail}")
+    else:
+        st.info("No companies yet — add context first.")
 
 # ---------------------------------------------------------------------------
 # Articles
@@ -321,7 +377,7 @@ elif page == "Articles":
             f"{article.created_at:%Y-%m-%d %H:%M}"
         ):
             st.caption(
-                f"Prompt: {article.prompt} · profiles used: sender v{article.sender_profile_id}, "
-                f"receiver v{article.receiver_profile_id}"
+                f"Prompt: {article.prompt} · PDF digests used: sender #{article.sender_pdf_digest_id or '—'}, "
+                f"receiver #{article.receiver_pdf_digest_id or '—'}"
             )
             render_article(article)

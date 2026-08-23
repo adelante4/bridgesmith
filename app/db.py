@@ -16,10 +16,14 @@ engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread"
 # missing column fails at runtime. No migration framework in this prototype
 # (spec.md), so patch new columns onto existing tables by hand here.
 _NEW_COLUMNS = [
-    ("companyprofile", "brand_primary_color", "VARCHAR"),
-    ("companyprofile", "brand_accent_color", "VARCHAR"),
-    ("companyprofile", "brand_font_family", "VARCHAR"),
     ("generatedarticle", "pdf_path", "VARCHAR"),
+    ("pdfdigest", "tone_signals", "TEXT"),
+    ("pdfdigest", "design_notes", "TEXT"),
+    ("pdfdigest", "brand_primary_color", "VARCHAR"),
+    ("pdfdigest", "brand_accent_color", "VARCHAR"),
+    ("pdfdigest", "brand_font_family", "VARCHAR"),
+    ("generatedarticle", "sender_pdf_digest_id", "INTEGER"),
+    ("generatedarticle", "receiver_pdf_digest_id", "INTEGER"),
 ]
 
 

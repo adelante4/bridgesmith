@@ -32,9 +32,10 @@ and a short context_hint drawn from the surrounding transcript text, so the visi
 looking for.
 
 Once you have reviewed the whole transcript and described the images worth describing, call submit_digest with \
-your final structured summary. submit_digest is your ONLY way to finish this task — after calling it, do not call \
-any other tool. There is a hard cap of 15 describe_image calls; if you hit it, proceed straight to submit_digest \
-with what you have.
+your final structured summary, including tone_signals — the writing/voice tone you observe in the document's own \
+text (formal, playful, technical, etc.), based only on how it's written, not on any visual design. submit_digest \
+is your ONLY way to finish this task — after calling it, do not call any other tool. There is a hard cap of 15 \
+describe_image calls; if you hit it, proceed straight to submit_digest with what you have.
 
 Keep working through the entire transcript before calling submit_digest — do not stop partway through. Call \
 describe_image to check an image rather than guessing its content from the surrounding text alone."""
@@ -43,27 +44,24 @@ INGESTION_AGENT_USER_PROMPT = """Transcript:
 {transcript}"""
 
 
-DEEP_RESEARCH_SYSTEM_PROMPT = """You are building a structured marketing profile for a company. You will be given \
-the company's name, and — depending on what the requester supplied — some combination of a digest of an uploaded \
-context PDF and/or a free-text description. Each input is labeled with where it came from; treat them as separate \
-sources, not one merged blob, and note that either or both may be absent besides the name. You have a web search \
-tool and a company-research-agent sub-agent available.
+DEEP_RESEARCH_SYSTEM_PROMPT = """You are building a structured research profile for a company. You will be given \
+the company's name, and — depending on what's been added for it so far — some combination of a digest of an \
+uploaded context PDF and/or a free-text description. Each input is labeled with where it came from; treat them as \
+separate sources, not one merged blob, and note that either or both may be absent besides the name. You have a web \
+search tool and a company-research-agent sub-agent available.
 
 Plan your work with the todo tool, then delegate deep research on this company to the company-research-agent \
 sub-agent (give it the company name and whatever inputs are present, and ask it to confirm/supplement: current \
 positioning, recent news, industry context not already covered). If neither a PDF digest nor a description was \
 supplied, research the company from its name alone via web search — do not invent document content that was never \
 given to you. Once research is back, verify it against whatever inputs were supplied and produce the final \
-structured company profile: offerings, industry, pain_points, tone_signals, summary, web_sources — every URL \
-cited during research, with a short note on what it supports — and brand: the company's primary/accent brand \
-colors and font family, if you can identify them from the company's own site, press kit, or visible brand \
-elements in the supplied context (e.g. a logo image). Leave any brand field null rather than guessing — a plain \
-company site with no distinct visual identity, or a source that gives you nothing to go on, means null, not an \
-invented color or font. Where web research contradicts a supplied input, prefer the supplied input for claims \
-about the company's own positioning and note the discrepancy in the summary; prefer the web for external facts \
-like recent news. Do not fabricate facts or sources.
+structured result: offerings, industry, pain_points, summary, web_sources — every URL cited during research, with \
+a short note on what it supports. Where web research contradicts a supplied input, prefer the supplied input for \
+claims about the company's own positioning and note the discrepancy in the summary; prefer the web for external \
+facts like recent news. Do not fabricate facts or sources. Writing tone and visual brand identity are gathered \
+elsewhere from the company's own PDFs — not your job here.
 
-Keep going until you have produced that final structured profile — delegating to the sub-agent is a step, not the \
+Keep going until you have produced that final structured result — delegating to the sub-agent is a step, not the \
 finish line; do not end your turn until every field is populated from real research."""
 
 DEEP_RESEARCH_USER_PROMPT = """Research and profile this company.
@@ -81,11 +79,27 @@ NO_DESCRIPTION_PLACEHOLDER = "(none — no description was provided for this run
 
 COMPANY_RESEARCH_SUBAGENT_PROMPT = """You are a focused company researcher. Given a company digest, use the \
 web_search tool to confirm and supplement it: current positioning, recent news, industry context not present in \
-the digest. Search rather than relying on what you already know — positioning and news go stale. While you're on \
-the company's own site, also note any clear brand signals you notice — a primary/accent color scheme or a \
-distinctive font/typeface used in their branding — but don't go out of your way hunting for these; report "no \
-clear brand signal" rather than guessing if the site doesn't make it obvious. Cite every URL you use. Report back \
-a concise research summary with citations — do not fabricate facts or sources."""
+the digest. Search rather than relying on what you already know — positioning and news go stale. Cite every URL \
+you use. Report back a concise research summary with citations — do not fabricate facts or sources."""
+
+
+# ---------------------------------------------------------------------------
+# Brand vision pass (ingestion-time, per PDF — colors + design notes only;
+# font family is detected deterministically from PDF metadata, not asked here)
+# ---------------------------------------------------------------------------
+
+BRAND_VISION_SYSTEM_PROMPT = """You are looking at the first page(s) of a company's context PDF, rendered as \
+images. Identify the company's visual brand identity as it appears on these pages:
+- primary_color and accent_color: hex codes for the dominant brand colors actually used in the design (headers, \
+logo, accents) — not incidental photo colors, and not a plain white/black page background. Leave null if the \
+pages show no clear, deliberate brand color.
+- design_notes: 1-3 short sentences on the visual style — layout density, imagery style, overall mood (e.g. \
+"clean minimal layout, lots of whitespace, professional photography" or "dense data-heavy slides, bold geometric \
+shapes").
+
+Do not guess a color or write design_notes you can't actually see in the images."""
+
+BRAND_VISION_USER_PROMPT = """These images are the first {page_count} page(s) of the company's context PDF."""
 
 
 GENERATE_DRAFT_SYSTEM_PROMPT = """You are writing a tailored B2B marketing article that bridges a Sender company \
