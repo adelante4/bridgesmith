@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-GitHub issues (via `gh` CLI) — note: no git remote configured yet, add one before using `gh issue` commands. See `docs/agents/issue-tracker.md`.
+GitHub issues (via `gh` CLI) — remote: `origin` → `https://github.com/adelante4/bridgesmith.git`. See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
