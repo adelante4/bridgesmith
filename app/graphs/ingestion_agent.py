@@ -24,7 +24,7 @@ from app.vision import describe_image_subagent, format_description_for_tool_resu
 
 logger = logging.getLogger(__name__)
 
-MAX_DESCRIBE_IMAGE_CALLS = 15
+MAX_DESCRIBE_IMAGE_CALLS = 50
 
 _IMAGE_TYPE_TO_TAG = {
     "logo": ImageTag.logo,

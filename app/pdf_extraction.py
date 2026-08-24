@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Defensive cap independent of the ingestion agent's 15-describe_image LLM-cost cap —
 # protects disk/extraction time against a pathological PDF with hundreds of images.
-MAX_IMAGES_EXTRACTED = 60
+MAX_IMAGES_EXTRACTED = 600
 
 
 @dataclass
