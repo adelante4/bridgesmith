@@ -504,6 +504,11 @@ receiver's actual situation, not generic B2B language), tone_match (matches the 
 structure (flow, lead strength, no duplication across sections), specificity (density of concrete anchors — \
 numbers, dates, named customers and products — and whether available researched specifics went unused).
 
+Claims about the sender's own track record (past customers, proof points, differentiators) are grounded if they \
+trace to the sender profile, even when the research section below doesn't repeat them — the research section \
+covers the receiver's situation and net-new sender proof points, not everything already established about the \
+sender.
+
 What counts as a blocking defect: a claim that contradicts the research or has no support anywhere in it; an \
 invented number, date, or customer; a missing required element; a section that is entirely abstract while \
 concrete facts sat unused; a call to action aimed at the wrong party.
@@ -525,6 +530,11 @@ edits that would add facts not present in the research."""
 
 CRITIQUE_USER_PROMPT = """Article:
 {article}
+
+Sender profile — what {sender_name} offers, what sets it apart, and what it has already proven with past \
+customers. Claims about the sender's own track record are grounded if they trace to this, not only to the \
+research section below:
+{sender_brief}
 
 Researched evidence the article was built from:
 {research}

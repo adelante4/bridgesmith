@@ -758,6 +758,8 @@ def critique_node(state: GenerationState) -> dict:
     model = get_agent_model(GENERATION_MODEL_ENV).with_structured_output(CritiqueSchema)
     prompt = CRITIQUE_USER_PROMPT.format(
         article=article_text,
+        sender_name=state["sender_name"],
+        sender_brief=state["sender_brief"],
         research=_evidence_block(state["research"]),
         caveats=_caveats_block(state["research"]),
     )
