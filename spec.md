@@ -1,17 +1,16 @@
 # Automated Generative Marketing Collateral — Build Spec
 
-
 Purpose: hand this file to Claude Code as the build spec for a working prototype + design.
 
 ---
 
-## 1. Context 
+## 1. Context
 
 Customer C is a marketing automation agency that creates personalized B2B marketing materials (newsletters, brochures) that bridge a **Sender** company (e.g. a software vendor) and a **Receiver** company (e.g. a target account) they're pitching. Today this is manual: research both companies, write a bridging article, gather visual assets, and hand-format everything into a strict publishing template.
 
 We are automating this with GenAI. The system takes PDF context on both companies, uses an LLM to write a tailored, factually-grounded article, and outputs structured **JSON** that maps into a pre-defined layout template (respecting word limits, image placeholders, and theme colors defined by that template).
 
-This spec covers: (a) the technical design (orchestration + cloud architecture), and (b) a lightweight, runnable prototype backend with exactly two HTTP endpoints, .
+This spec covers: (a) the technical design (orchestration + cloud architecture), and (b) a lightweight, runnable prototype backend with exactly two HTTP endpoints.
 
 ---
 
@@ -44,7 +43,7 @@ This spec covers: (a) the technical design (orchestration + cloud architecture),
 
 ## 3. Orchestration Design (LangGraph)
 
-Two flows, both defined as LangGraph graphs so the orchestration is explicit and inspectable .
+Two flows, both defined as LangGraph graphs so the orchestration is explicit and inspectable.
 
 ### 3.1 Ingestion graph (triggered by `POST /context`)
 

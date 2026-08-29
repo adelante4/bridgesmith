@@ -95,5 +95,5 @@ Costs and risks:
   "colours" come from a photographic or gradient logo has not been tried.
 - **Emphasis is a model judgement.** The writer decides what to mark; a section can come back with no marks
   (one of three did on the verification run). The design degrades to plain body text, which is acceptable.
-- **`brochure_v2` is still beyond spec.** It should be presented as a demo artifact, not as evidence of having
-  the JSON contract remains the deliverable.
+- **`brochure_v2` is still beyond spec.** It should be presented as a demo artifact — the JSON contract remains
+  the deliverable.
