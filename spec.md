@@ -2,6 +2,11 @@
 
 Purpose: hand this file to Claude Code as the build spec for a working prototype + design.
 
+> **This is the original build spec — a frozen planning document, not living documentation.** The design
+> has since evolved (e.g. `CompanyProfile` was retired for three append-only logs, and `/context` split into
+> ingestion + a separate `/context/{company_id}/research` call — see `docs/adr/0005-decouple-context-from-research.md`).
+> For current terminology and behavior, see `CONTEXT.md` and `docs/adr/`; for current setup/usage, see `README.md`.
+
 ---
 
 ## 1. Context
@@ -10,7 +15,7 @@ Customer C is a marketing automation agency that creates personalized B2B market
 
 We are automating this with GenAI. The system takes PDF context on both companies, uses an LLM to write a tailored, factually-grounded article, and outputs structured **JSON** that maps into a pre-defined layout template (respecting word limits, image placeholders, and theme colors defined by that template).
 
-This spec covers: (a) the technical design (orchestration + cloud architecture), and (b) a lightweight, runnable prototype backend with exactly two HTTP endpoints.
+This spec covers: (a) the technical design (orchestration + cloud architecture), and (b) a lightweight, runnable prototype backend (originally two HTTP endpoints; a third, `/context/{company_id}/research`, was added later — see banner above).
 
 ---
 

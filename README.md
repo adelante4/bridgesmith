@@ -6,7 +6,7 @@ Full technical design: [`spec.md`](spec.md). Cloud architecture design: [`docs/a
 
 ## Architecture in one paragraph
 
-Two LangGraph-orchestrated pipelines. **Ingestion** (`POST /context`): deterministic PyMuPDF extraction of an image-annotated transcript → a tool-calling Claude agent that reads the transcript and selectively calls a vision subagent to describe relevant images → a structured digest → a LangChain deep research agent (`deepagents.create_deep_agent`, plans with a todo list, delegates to a company-research sub-agent bound to Claude's native web search) that produces a structured company profile, persisted once and reused by every future `/generate` call for that company. **Generation** (`POST /generate`): aggregate everything on file for both companies → plan perspective-guided research (STORM) → answer it with a web-search agent → outline, assigning specific facts to specific sections → draft each section, then write the headline, pull quote and CTA *from the finished body* → polish → critique/revise (bounded by rubric score, not by the critic running out of opinions) → validate word limits and a concrete-anchor gate in code → targeted repair loop (max 2 attempts, then hard-truncate) → match image slots to extracted assets → optionally render to PDF.
+Two LangGraph-orchestrated pipelines, decoupled on purpose (`docs/adr/0005-decouple-context-from-research.md`): adding context never fires an LLM web-search call, and research never requires a fresh upload. **Ingestion** (`POST /context`): deterministic PyMuPDF extraction of an image-annotated transcript → a tool-calling Claude agent that reads the transcript and selectively calls a vision subagent to describe relevant images → a structured digest (`PdfDigest`), appended to that company's log — no LLM web-search call happens here. **Research** (`POST /context/{company_id}/research`): a separate, explicitly-triggered call — a LangChain deep research agent (`deepagents.create_deep_agent`, plans with a todo list, delegates to a company-research sub-agent bound to Claude's native web search) reads the company's latest `PdfDigest`/descriptions and produces a structured `ResearchRun`, appended to that company's log. **Generation** (`POST /generate`): aggregate everything on file for both companies (latest `PdfDigest` + all `Description`s + latest `ResearchRun`) → plan perspective-guided research (STORM) → answer it with a web-search agent → outline, assigning specific facts to specific sections → draft each section, then write the headline, pull quote and CTA *from the finished body* → polish → critique/revise (bounded by rubric score, not by the critic running out of opinions) → validate word limits and a concrete-anchor gate in code → targeted repair loop (max 2 attempts, then hard-truncate) → match image slots to extracted assets → optionally render to PDF.
 
 Two invariants keep the prose from collapsing into generic hedged filler, both learned the hard way: only *evidence* facts reach a writer (caveats — things research could not verify — go to the critic instead), and anything that comments on the article is written after it. See `docs/adr/0006-evidence-caveat-split.md`, plus `spec.md` §3 and `app/deep_research.py` for the node-by-node rationale.
 
@@ -70,6 +70,12 @@ curl -X POST http://localhost:8000/context \
   -F file=@path/to/globex_brief.pdf
 ```
 
+Optionally trigger deep web research for a company — not required before `/generate`, but improves grounding if run first:
+
+```bash
+curl -X POST http://localhost:8000/context/co_a1b2c3d4/research
+```
+
 Generate a tailored article:
 
 ```bash
@@ -84,7 +90,7 @@ curl -X POST http://localhost:8000/generate \
 
 `template_id` is optional in the request body and defaults to `b2b_newsletter_v1` (see `config/templates/b2b_newsletter_v1.json`).
 
-**Note on latency:** `/context` runs the full ingestion chain synchronously — extraction, an agentic tool loop (each image description is its own Claude round trip), and web-search-grounded profiling. For a document with several images this can take tens of seconds. This is expected for a demo; `docs/architecture.md` describes the async S3→SQS→Lambda design that would decouple this in production.
+**Note on latency:** `/context` runs the ingestion chain synchronously — extraction plus an agentic tool loop (each image description is its own Claude round trip), but no web search. `/context/{company_id}/research` is the synchronous, separately-triggered call that does web-search-grounded profiling. For a document with several images, or a research run, either can take tens of seconds. This is expected for a demo; `docs/architecture.md` describes the async S3→SQS→Lambda design that would decouple this in production.
 
 ## Explicitly out of scope
 
@@ -103,7 +109,7 @@ A minimal Streamlit backoffice is included for browsing stored companies and dri
 
 ## Backoffice UI
 
-A Streamlit app for browsing companies (profiles, PDF digests, extracted images), triggering `/context` uploads and `/generate` calls, and reviewing past generated articles — reads the SQLite DB directly and calls the API over HTTP.
+A Streamlit app for browsing companies (PDF digests, research runs, extracted images), triggering `/context` uploads, `/context/{company_id}/research` runs, and `/generate` calls, and reviewing past generated articles — reads the SQLite DB directly and calls the API over HTTP.
 
 ```bash
 uvicorn app.main:app --reload &      # API must be running for Generate/Upload pages
@@ -145,7 +151,7 @@ app/
     generation_graph.py      load_profiles -> research -> outline -> draft -> polish -> critique -> validate
   pdf_templates/              print stylesheets, one per rendering template
   routes/
-    context.py                POST /context
+    context.py                POST /context, POST /context/{company_id}/research
     generate.py                POST /generate
 backoffice/streamlit_app.py             Streamlit backoffice UI
 config/templates/            layout template configs (fixed input contract)

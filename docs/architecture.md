@@ -14,13 +14,13 @@ S3 for raw PDFs and extracted images, one prefix per company: `s3://.../companie
 
 ## Metadata store
 
-DynamoDB. `Company` and `CompanyProfile` tables keyed by `company_id` (partition key) — a direct swap-in for the prototype's SQLite tables, same shape.
+DynamoDB. `Company`, `PdfDigest`, `Description`, and `ResearchRun` tables keyed by `company_id` (partition key) — a direct swap-in for the prototype's SQLite tables, same shape. (Originally designed around a single `CompanyProfile` table; the prototype since replaced that with these three append-only logs — see `docs/adr/0005-decouple-context-from-research.md` — and this cloud design hasn't been updated to match.)
 
 ## LLM
 
 Amazon Bedrock, model-agnostic within Bedrock's catalog — matches the provider-agnostic LangChain design already used for `generate_draft`, so swapping local API keys for Bedrock there is a config change, not a rewrite.
 
-**Caveat to flag explicitly:** Bedrock's Claude does not expose the same native server-side web search tool used in `profile_company` on the direct Anthropic API. Production options:
+**Caveat to flag explicitly:** Bedrock's Claude does not expose the same native server-side web search tool used in the deep research step (`app/deep_research.py`, triggered by `POST /context/{company_id}/research`) on the direct Anthropic API. Production options:
 1. Call the direct Anthropic API specifically for the profiling step while using Bedrock for everything else.
 2. Bind an external search tool (Tavily/Brave/SerpAPI) to the Bedrock-hosted model to replicate the same research behavior.
 
